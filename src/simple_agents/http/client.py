@@ -57,7 +57,7 @@ class HTTPClient:
             body = await resp.text()
             if resp.status >= 400:
                 raise HTTPError(resp.status, resp.reason or "Request failed", body)
-            return cast(dict[str, Any], json.loads(body))
+            return cast("dict[str, Any]", json.loads(body))
 
     async def get_json(
         self,
@@ -82,7 +82,7 @@ class HTTPClient:
             body = await resp.text()
             if resp.status >= 400:
                 raise HTTPError(resp.status, resp.reason or "Request failed", body)
-            return cast(dict[str, Any], json.loads(body))
+            return cast("dict[str, Any]", json.loads(body))
 
     async def post_stream(
         self,

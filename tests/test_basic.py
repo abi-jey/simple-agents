@@ -3,24 +3,20 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import pytest
-
-from simple_agents import (
-    Agent,
-    DoneEvent,
-    ErrorEvent,
-    GenerationConfig,
-    Message,
-    Provider,
-    ProviderType,
-    SessionManager,
-    TextChunkEvent,
-    TextDoneEvent,
-    ToolCallEvent,
-    ToolDefinition,
-    ToolResultEvent,
-    UsageEvent,
-)
+from simple_agents import Agent
+from simple_agents import DoneEvent
+from simple_agents import ErrorEvent
+from simple_agents import GenerationConfig
+from simple_agents import Message
+from simple_agents import Provider
+from simple_agents import ProviderType
+from simple_agents import SessionManager
+from simple_agents import TextChunkEvent
+from simple_agents import TextDoneEvent
+from simple_agents import ToolCallEvent
+from simple_agents import ToolDefinition
+from simple_agents import ToolResultEvent
+from simple_agents import UsageEvent
 
 
 class TestTypes:

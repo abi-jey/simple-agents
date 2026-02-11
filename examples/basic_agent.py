@@ -62,7 +62,7 @@ def calculate(expression: str) -> str:
         allowed = set("0123456789+-*/(). ")
         if not all(c in allowed for c in expression):
             return "Error: Invalid characters in expression"
-        result = eval(expression)  # noqa: S307
+        result = eval(expression)
         return f"{expression} = {result}"
     except Exception as e:
         return f"Error evaluating expression: {e}"

@@ -13,15 +13,14 @@ Schema Design:
 import json
 import logging
 from dataclasses import asdict
+from datetime import UTC
 from datetime import datetime
-from datetime import timezone
 from pathlib import Path
 from typing import Any
 from typing import Literal
 
 import aiosqlite
 
-from .types import BatchConfig
 from .types import BatchJob
 from .types import BatchRequest
 from .types import BatchRequestCounts
@@ -437,7 +436,7 @@ class BatchStore:
         await self.initialize()
 
         async with aiosqlite.connect(self.db_path) as db:
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             await db.execute(
                 """UPDATE v2_batch_jobs SET
                     processed = 1,

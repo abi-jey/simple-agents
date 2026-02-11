@@ -19,7 +19,6 @@ from typing import Any
 from ..http import HTTPClient
 from ..provider import ProviderType
 from ..types import GenerationConfig
-from ..types import Message
 from ..types import ToolDefinition
 from .types import BatchConfig
 from .types import BatchJob
