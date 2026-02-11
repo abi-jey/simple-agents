@@ -185,16 +185,18 @@ class BatchClient:
             content_type="application/jsonl",
         )
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(
                 upload_url,
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 data=form,
-            ) as resp:
-                if resp.status >= 400:
-                    error_text = await resp.text()
-                    raise RuntimeError(f"Failed to upload batch file: {resp.status} {error_text}")
-                file_response = await resp.json()
+            ) as resp,
+        ):
+            if resp.status >= 400:
+                error_text = await resp.text()
+                raise RuntimeError(f"Failed to upload batch file: {resp.status} {error_text}")
+            file_response = await resp.json()
 
         input_file_id = file_response["id"]
         logger.info(f"Uploaded batch input file: {input_file_id}")
@@ -266,12 +268,14 @@ class BatchClient:
         # Download file content
         import aiohttp
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as resp:
-                if resp.status >= 400:
-                    error_text = await resp.text()
-                    raise RuntimeError(f"Failed to download results: {resp.status} {error_text}")
-                content = await resp.text()
+        async with (
+            aiohttp.ClientSession() as session,
+            session.get(url, headers=headers) as resp,
+        ):
+            if resp.status >= 400:
+                error_text = await resp.text()
+                raise RuntimeError(f"Failed to download results: {resp.status} {error_text}")
+            content = await resp.text()
 
         # Parse JSONL
         for line in content.strip().split("\n"):
@@ -473,7 +477,7 @@ class BatchClient:
         # Stream results from URL
         import aiohttp
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession() as session:  # noqa: SIM117
             async with session.get(job.results_url, headers=headers) as resp:
                 if resp.status >= 400:
                     error_text = await resp.text()

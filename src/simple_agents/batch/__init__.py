@@ -52,16 +52,13 @@ from .types import BatchResult
 from .types import BatchStatus
 
 __all__ = [
-    # High-level API
-    "BatchManager",
-    # Low-level API
     "BatchClient",
-    "BatchStore",
-    # Types
-    "BatchRequest",
+    "BatchConfig",
     "BatchJob",
+    "BatchManager",
+    "BatchRequest",
+    "BatchRequestCounts",
     "BatchResult",
     "BatchStatus",
-    "BatchConfig",
-    "BatchRequestCounts",
+    "BatchStore",
 ]

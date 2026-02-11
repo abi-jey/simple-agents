@@ -42,29 +42,29 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      
+
       - name: Install dependencies
         run: pip install toml
-      
+
       - name: Bump version
         id: bump
         run: |
           import toml
           import os
-          
+
           bump_type = "${{ inputs.version_bump }}"
-          
+
           with open('pyproject.toml', 'r') as f:
               config = toml.load(f)
-          
+
           current = config['project']['version']
           parts = current.split('.')
           major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2].split('-')[0].split('.dev')[0])
-          
+
           if bump_type == 'major':
               major += 1
               minor = 0
@@ -74,19 +74,19 @@ jobs:
               patch = 0
           elif bump_type == 'patch':
               patch += 1
-          
+
           new_version = f"{major}.{minor}.{patch}"
-          
+
           config['project']['version'] = new_version
           with open('pyproject.toml', 'w') as f:
               toml.dump(config, f)
-          
+
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f"version={new_version}\n")
-          
+
           print(f"Bumped version: {current} -> {new_version}")
         shell: python
-      
+
       - name: Commit and push version bump
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
@@ -108,19 +108,19 @@ jobs:
         with:
           ref: ${{ github.ref }}
           fetch-depth: 0
-      
+
       # Pull latest if version was bumped
       - name: Pull latest changes
         if: needs.bump-version.result == 'success'
         run: git pull origin ${{ github.ref_name }}
-      
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      
+
       - name: Install pre-commit
         run: pip install pre-commit
-      
+
       - name: Run pre-commit
         run: pre-commit run --all-files
 
@@ -140,24 +140,24 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref }}
-      
+
       - name: Pull latest changes
         run: git pull origin ${{ github.ref_name }} || true
-      
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           allow-prereleases: true
-      
+
       - name: Install package and test dependencies
         run: pip install -e ".[dev]"
-      
+
       - name: Verify package import
         run: python -c "from simple_agents import Agent, Provider, ProviderType; print('Package imports work')"
-      
+
       - name: Run tests
         run: pytest tests/ -v --cov=simple_agents --cov-report=xml --cov-report=term-missing
-      
+
       - name: Upload coverage
         if: matrix.python-version == '3.12'
         uses: codecov/codecov-action@v5
@@ -182,21 +182,21 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref }}
-      
+
       - name: Pull latest changes
         run: git pull origin ${{ github.ref_name }} || true
-      
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           allow-prereleases: true
-      
+
       - name: Install package and test dependencies
         run: pip install -e ".[dev]"
-      
+
       - name: Verify package import
         run: python -c "from simple_agents import Agent, Provider, ProviderType; print('Package imports work')"
-      
+
       - name: Run tests
         run: pytest tests/ -v
 
@@ -216,22 +216,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref }}
-      
+
       - name: Pull latest changes
         shell: bash
         run: git pull origin ${{ github.ref_name }} || true
-      
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           allow-prereleases: true
-      
+
       - name: Install package and test dependencies
         run: pip install -e ".[dev]"
-      
+
       - name: Verify package import
         run: python -c "from simple_agents import Agent, Provider, ProviderType; print('Package imports work')"
-      
+
       - name: Run tests
         run: pytest tests/ -v
 
@@ -251,23 +251,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref }}
-      
+
       - name: Pull latest changes
         run: git pull origin ${{ github.ref_name }} || true
-      
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      
+
       - name: Install build tools
         run: pip install build hatch
-      
+
       - name: Build wheel and sdist
         run: python -m build
-      
+
       - name: List artifacts
         run: ls -la dist/
-      
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist
@@ -294,49 +294,49 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
       - name: Pull latest changes
         run: git pull origin ${{ github.ref_name }} || true
-      
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      
+
       - name: Install dependencies
         run: pip install toml
-      
+
       - name: Get version
         id: version
         run: |
           import toml
           import os
-          
+
           with open('pyproject.toml', 'r') as f:
               config = toml.load(f)
-          
+
           version = config['project']['version']
-          
+
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f"version={version}\n")
-          
+
           print(f"Version: {version}")
         shell: python
-      
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist
-      
+
       - name: List artifacts
         run: ls -la dist/
-      
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
           skip-existing: true
-      
+
       - name: Get previous stable tag
         id: prev_tag
         run: |
@@ -346,23 +346,23 @@ jobs:
           fi
           echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
           echo "Previous stable tag: $PREV_TAG"
-      
+
       - name: Generate release notes
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           PREV_TAG="${{ steps.prev_tag.outputs.prev_tag }}"
-          
+
           echo "## What's Changed" > release_notes.md
           echo "" >> release_notes.md
-          
+
           git log ${PREV_TAG}..HEAD --pretty=format:"* %s (%h)" --no-merges >> release_notes.md
-          
+
           echo "" >> release_notes.md
           echo "" >> release_notes.md
           echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...v${VERSION}" >> release_notes.md
-          
+
           cat release_notes.md
-      
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -389,51 +389,51 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      
+
       - name: Install dependencies
         run: pip install toml build
-      
+
       - name: Generate dev version
         id: version
         run: |
           import toml
           import os
           from datetime import datetime
-          
+
           with open('pyproject.toml', 'r') as f:
               config = toml.load(f)
-          
+
           base_version = config['project']['version']
           timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-          
+
           dev_version = f"{base_version}.dev{timestamp}"
-          
+
           config['project']['version'] = dev_version
           with open('pyproject.toml', 'w') as f:
               toml.dump(config, f)
-          
+
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f"version={dev_version}\n")
-          
+
           print(f"Dev version: {dev_version}")
         shell: python
-      
+
       - name: Build wheel and sdist
         run: python -m build
-      
+
       - name: List artifacts
         run: ls -la dist/
-      
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
           skip-existing: true
-      
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:

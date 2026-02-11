@@ -84,39 +84,39 @@ class BatchStore:
                     provider TEXT NOT NULL,  -- 'openai' or 'anthropic'
                     status TEXT NOT NULL,    -- BatchStatus value
                     model TEXT NOT NULL,
-                    
+
                     -- Request counts
                     total_requests INTEGER DEFAULT 0,
                     succeeded INTEGER DEFAULT 0,
                     failed INTEGER DEFAULT 0,
                     cancelled INTEGER DEFAULT 0,
                     expired INTEGER DEFAULT 0,
-                    
+
                     -- Timestamps (ISO format)
                     created_at TEXT,
                     expires_at TEXT,
                     completed_at TEXT,
-                    
+
                     -- Provider-specific IDs
                     input_file_id TEXT,      -- OpenAI
                     output_file_id TEXT,     -- OpenAI
                     error_file_id TEXT,      -- OpenAI
                     results_url TEXT,        -- Anthropic
-                    
+
                     -- Processing state
                     processed INTEGER DEFAULT 0,  -- 0 = pending, 1 = processed
                     processed_at TEXT,
-                    
+
                     -- Callback for result handling
                     callback_name TEXT,      -- Handler function name
                     callback_context TEXT,   -- JSON context for handler
-                    
+
                     -- API connection info (for resuming)
                     base_url TEXT,
-                    
+
                     -- Metadata
                     metadata TEXT,           -- JSON user metadata
-                    
+
                     -- Tracking
                     db_created_at TEXT DEFAULT (datetime('now')),
                     db_updated_at TEXT DEFAULT (datetime('now'))
@@ -132,12 +132,12 @@ class BatchStore:
                     tools TEXT,                  -- JSON serialized tools
                     config TEXT,                 -- JSON serialized config
                     system_prompt TEXT,
-                    
+
                     -- Result tracking
                     result_type TEXT,            -- succeeded, errored, cancelled, expired
                     result_content TEXT,
                     result_error TEXT,
-                    
+
                     FOREIGN KEY (batch_id) REFERENCES v2_batch_jobs(id),
                     UNIQUE (batch_id, custom_id)
                 );
@@ -344,14 +344,14 @@ class BatchStore:
 
             if provider:
                 cursor = await db.execute(
-                    """SELECT * FROM v2_batch_jobs 
+                    """SELECT * FROM v2_batch_jobs
                     WHERE processed = 0 AND provider = ?
                     ORDER BY db_created_at ASC""",
                     (provider,),
                 )
             else:
                 cursor = await db.execute(
-                    """SELECT * FROM v2_batch_jobs 
+                    """SELECT * FROM v2_batch_jobs
                     WHERE processed = 0
                     ORDER BY db_created_at ASC"""
                 )
@@ -379,7 +379,7 @@ class BatchStore:
             db.row_factory = aiosqlite.Row
             placeholders = ",".join(["?"] * len(active_statuses))
             cursor = await db.execute(
-                f"""SELECT * FROM v2_batch_jobs 
+                f"""SELECT * FROM v2_batch_jobs
                 WHERE status IN ({placeholders})
                 ORDER BY db_created_at ASC""",
                 active_statuses,
@@ -412,7 +412,7 @@ class BatchStore:
             db.row_factory = aiosqlite.Row
             placeholders = ",".join(["?"] * len(completed_statuses))
             cursor = await db.execute(
-                f"""SELECT * FROM v2_batch_jobs 
+                f"""SELECT * FROM v2_batch_jobs
                 WHERE status IN ({placeholders}) AND processed = 0
                 ORDER BY db_created_at ASC""",
                 completed_statuses,
@@ -710,14 +710,14 @@ class BatchStore:
 
     def _row_to_batch_job(self, row: aiosqlite.Row) -> BatchJob:
         """Convert database row to BatchJob."""
+        import contextlib
+
         status = BatchStatus(row["status"])
 
         metadata = {}
         if row["metadata"]:
-            try:
+            with contextlib.suppress(json.JSONDecodeError):
                 metadata = json.loads(row["metadata"])
-            except json.JSONDecodeError:
-                pass
 
         return BatchJob(
             id=row["id"],

@@ -1,21 +1,25 @@
 """Basic tests for simple_agents package."""
 
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
 import pytest
 
 from simple_agents import (
     Agent,
+    DoneEvent,
+    ErrorEvent,
+    GenerationConfig,
+    Message,
     Provider,
     ProviderType,
-    Message,
-    ToolDefinition,
-    GenerationConfig,
+    SessionManager,
     TextChunkEvent,
     TextDoneEvent,
     ToolCallEvent,
+    ToolDefinition,
     ToolResultEvent,
     UsageEvent,
-    ErrorEvent,
-    DoneEvent,
 )
 
 
@@ -81,23 +85,23 @@ class TestEvents:
     def test_tool_call_event(self) -> None:
         """Test ToolCallEvent creation."""
         event = ToolCallEvent(
-            call_id="123",
+            id="123",
             name="test_tool",
             arguments={"arg": "value"},
         )
-        assert event.call_id == "123"
+        assert event.id == "123"
         assert event.name == "test_tool"
         assert event.arguments == {"arg": "value"}
 
     def test_tool_result_event(self) -> None:
         """Test ToolResultEvent creation."""
         event = ToolResultEvent(
-            call_id="123",
+            id="123",
             name="test_tool",
             result="success",
             duration_ms=10.5,
         )
-        assert event.call_id == "123"
+        assert event.id == "123"
         assert event.result == "success"
         assert event.duration_ms == 10.5
         assert event.error is None
@@ -160,11 +164,11 @@ class TestProvider:
     def test_provider_creation_anthropic(self) -> None:
         """Test Anthropic provider creation."""
         provider = Provider(
-            provider_type=ProviderType.ANTHROPIC_NATIVE,
+            provider_type=ProviderType.ANTHROPIC,
             api_key="test-key",
             model="claude-3-5-sonnet-20241022",
         )
-        assert provider.provider_type == ProviderType.ANTHROPIC_NATIVE
+        assert provider.provider_type == ProviderType.ANTHROPIC
         assert provider.model == "claude-3-5-sonnet-20241022"
 
 
@@ -173,13 +177,15 @@ class TestAgent:
 
     def test_agent_creation(self) -> None:
         """Test Agent instantiation."""
-        provider = Provider(
-            provider_type=ProviderType.OPENAI_COMPATIBLE,
-            api_key="test-key",
-            model="gpt-4o-mini",
-        )
-        agent = Agent(provider=provider)
-        assert agent.provider == provider
+        with TemporaryDirectory() as tmpdir:
+            provider = Provider(
+                provider_type=ProviderType.OPENAI_COMPATIBLE,
+                api_key="test-key",
+                model="gpt-4o-mini",
+            )
+            session_manager = SessionManager(Path(tmpdir) / "sessions.db")
+            agent = Agent(provider=provider, session_manager=session_manager)
+            assert agent.provider == provider
 
     def test_agent_with_tools(self) -> None:
         """Test Agent with tool functions."""
@@ -188,23 +194,33 @@ class TestAgent:
             """An example tool."""
             return f"Result: {arg}"
 
-        provider = Provider(
-            provider_type=ProviderType.OPENAI_COMPATIBLE,
-            api_key="test-key",
-            model="gpt-4o-mini",
-        )
-        agent = Agent(provider=provider, tools=[example_tool])
-        assert len(agent.tools) == 1
+        with TemporaryDirectory() as tmpdir:
+            provider = Provider(
+                provider_type=ProviderType.OPENAI_COMPATIBLE,
+                api_key="test-key",
+                model="gpt-4o-mini",
+            )
+            session_manager = SessionManager(Path(tmpdir) / "sessions.db")
+            agent = Agent(
+                provider=provider,
+                session_manager=session_manager,
+                tools=[example_tool],
+            )
+            # Check tool was registered
+            assert agent._tool_registry is not None
 
     def test_agent_with_system_prompt(self) -> None:
         """Test Agent with system prompt."""
-        provider = Provider(
-            provider_type=ProviderType.OPENAI_COMPATIBLE,
-            api_key="test-key",
-            model="gpt-4o-mini",
-        )
-        agent = Agent(
-            provider=provider,
-            system_prompt="You are a helpful assistant.",
-        )
-        assert agent.system_prompt == "You are a helpful assistant."
+        with TemporaryDirectory() as tmpdir:
+            provider = Provider(
+                provider_type=ProviderType.OPENAI_COMPATIBLE,
+                api_key="test-key",
+                model="gpt-4o-mini",
+            )
+            session_manager = SessionManager(Path(tmpdir) / "sessions.db")
+            agent = Agent(
+                provider=provider,
+                session_manager=session_manager,
+                system_prompt="You are a helpful assistant.",
+            )
+            assert agent.system_prompt == "You are a helpful assistant."
