@@ -153,10 +153,10 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Verify package import
-        run: python -c "from simple_agents import Agent, Provider, ProviderType; print('Package imports work')"
+        run: python -c "from nagents import Agent, Provider, ProviderType; print('Package imports work')"
 
       - name: Run tests
-        run: pytest tests/ -v --cov=simple_agents --cov-report=xml --cov-report=term-missing
+        run: pytest tests/ -v --cov=nagents --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage
         if: matrix.python-version == '3.12'
@@ -195,7 +195,7 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Verify package import
-        run: python -c "from simple_agents import Agent, Provider, ProviderType; print('Package imports work')"
+        run: python -c "from nagents import Agent, Provider, ProviderType; print('Package imports work')"
 
       - name: Run tests
         run: pytest tests/ -v
@@ -230,7 +230,7 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Verify package import
-        run: python -c "from simple_agents import Agent, Provider, ProviderType; print('Package imports work')"
+        run: python -c "from nagents import Agent, Provider, ProviderType; print('Package imports work')"
 
       - name: Run tests
         run: pytest tests/ -v
@@ -286,7 +286,7 @@ jobs:
       (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.version_bump != 'none'))
     environment:
       name: pypi-stable
-      url: https://pypi.org/project/simple-agents/
+      url: https://pypi.org/project/nagents/
     permissions:
       id-token: write
       contents: write
@@ -381,7 +381,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.publish_dev
     environment:
       name: pypi-dev
-      url: https://pypi.org/project/simple-agents/
+      url: https://pypi.org/project/nagents/
     permissions:
       id-token: write
       contents: write
