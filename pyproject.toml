@@ -77,3 +77,8 @@ packages = [ "src/nagents",]
 
 [tool.hatch.build.targets.sdist]
 include = [ "/src", "/tests", "/docs", "LICENSE", "README.md", "pyproject.toml",]
+
+[tool.poetry.group.docs.dependencies]
+mkdocs-material = "^9.7.1"
+mkdocstrings = "^1.0.3"
+mkdocstrings-python = "^2.0.2"
