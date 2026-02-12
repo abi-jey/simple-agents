@@ -11,11 +11,11 @@ flowchart TB
         A[Anthropic]
         G[Google Gemini]
     end
-    
+
     Agent --> |Primary| O
     Agent --> |Fallback| A
     Agent --> |Specialized| G
-    
+
     O --> Response
     A --> Response
     G --> Response
@@ -346,7 +346,7 @@ if __name__ == "__main__":
 
 !!! tip "Cost Optimization"
     Route simpler tasks to cheaper providers:
-    
+
     ```python
     def select_provider(complexity: str) -> Provider:
         if complexity == "simple":
@@ -359,25 +359,25 @@ if __name__ == "__main__":
 
 !!! warning "API Key Management"
     Store API keys securely and validate they exist:
-    
+
     ```python
     import os
 
     def get_available_providers() -> list[Provider]:
         providers = []
-        
+
         if key := os.environ.get("OPENAI_API_KEY"):
             providers.append(OpenAIProvider(api_key=key, model="gpt-4o-mini"))
-        
+
         if key := os.environ.get("ANTHROPIC_API_KEY"):
             providers.append(AnthropicProvider(api_key=key, model="claude-sonnet-4-20250514"))
-        
+
         if key := os.environ.get("GOOGLE_API_KEY"):
             providers.append(GoogleProvider(api_key=key, model="gemini-2.0-flash"))
-        
+
         if not providers:
             raise ValueError("No API keys configured!")
-        
+
         return providers
     ```
 

@@ -40,7 +40,7 @@ def get_current_time() -> str:  # (1)!
 def calculate(expression: str) -> str:  # (2)!
     """
     Evaluate a mathematical expression.
-    
+
     Args:
         expression: A mathematical expression to evaluate (e.g., "2 + 2 * 3")
     """
@@ -57,20 +57,20 @@ def calculate(expression: str) -> str:  # (2)!
 
 async def main():
     session_manager = SessionManager(Path("sessions.db"))
-    
+
     # Create tools from functions
     tools = [
         Tool.from_function(get_current_time),  # (3)!
         Tool.from_function(calculate),
     ]
-    
+
     agent = Agent(
         provider=OpenAIProvider(model="gpt-4o-mini"),
         session_manager=session_manager,
         system_prompt="You are a helpful assistant with access to tools.",
         tools=tools,
     )
-    
+
     # The agent will automatically use tools when appropriate
     async for event in agent.run("What time is it, and what is 15% of 85?"):
         if event.type == "text_delta":
@@ -79,7 +79,7 @@ async def main():
             print(f"\n[Calling tool: {event.name}]")
         elif event.type == "tool_result":
             print(f"[Tool result: {event.result}]\n")
-    
+
     print()
 
 
@@ -107,7 +107,7 @@ from nagents.providers import OpenAIProvider
 async def fetch_weather(city: str) -> str:
     """
     Fetch current weather for a city.
-    
+
     Args:
         city: The city name to get weather for
     """
@@ -117,13 +117,13 @@ async def fetch_weather(city: str) -> str:
             f"https://wttr.in/{city}?format=j1",
             timeout=10.0,
         )
-        
+
         if response.status_code != 200:
             return f"Could not fetch weather for {city}"
-        
+
         data = response.json()
         current = data["current_condition"][0]
-        
+
         return (
             f"Weather in {city}: {current['weatherDesc'][0]['value']}, "
             f"Temperature: {current['temp_C']}°C, "
@@ -134,7 +134,7 @@ async def fetch_weather(city: str) -> str:
 async def search_wikipedia(query: str) -> str:
     """
     Search Wikipedia and return a summary.
-    
+
     Args:
         query: The search query
     """
@@ -143,34 +143,34 @@ async def search_wikipedia(query: str) -> str:
             "https://en.wikipedia.org/api/rest_v1/page/summary/" + query,
             timeout=10.0,
         )
-        
+
         if response.status_code != 200:
             return f"No Wikipedia article found for '{query}'"
-        
+
         data = response.json()
         return data.get("extract", "No summary available")[:500]
 
 
 async def main():
     session_manager = SessionManager(Path("sessions.db"))
-    
+
     tools = [
         Tool.from_function(fetch_weather),
         Tool.from_function(search_wikipedia),
     ]
-    
+
     agent = Agent(
         provider=OpenAIProvider(model="gpt-4o-mini"),
         session_manager=session_manager,
         tools=tools,
     )
-    
+
     async for event in agent.run(
         "What's the weather in Tokyo and tell me about Mount Fuji?"
     ):
         if event.type == "text_delta":
             print(event.content, end="", flush=True)
-    
+
     print()
 
 
@@ -225,7 +225,7 @@ Tools can accept complex parameter types:
     ) -> dict[str, Any]:
         """
         Create a new task.
-        
+
         Args:
             title: Task title
             description: Detailed task description
@@ -265,7 +265,7 @@ class ToolError(Exception):
 def divide(a: float, b: float) -> str:
     """
     Divide two numbers.
-    
+
     Args:
         a: The numerator
         b: The denominator
@@ -278,25 +278,25 @@ def divide(a: float, b: float) -> str:
 def read_file(path: str) -> str:
     """
     Read contents of a file.
-    
+
     Args:
         path: Path to the file to read
     """
     try:
         file_path = Path(path)
-        
+
         # Security check
         if ".." in path:
             raise ToolError("Path traversal not allowed")
-        
+
         if not file_path.exists():
             raise ToolError(f"File not found: {path}")
-        
+
         if file_path.stat().st_size > 1_000_000:  # 1MB limit
             raise ToolError("File too large (max 1MB)")
-        
+
         return file_path.read_text()[:5000]  # Limit output
-        
+
     except ToolError:
         raise
     except Exception as e:
@@ -305,7 +305,7 @@ def read_file(path: str) -> str:
 
 async def main():
     session_manager = SessionManager(Path("sessions.db"))
-    
+
     agent = Agent(
         provider=OpenAIProvider(model="gpt-4o-mini"),
         session_manager=session_manager,
@@ -314,14 +314,14 @@ async def main():
             Tool.from_function(read_file),
         ],
     )
-    
+
     # The agent will handle errors gracefully
     async for event in agent.run("What is 10 divided by 0?"):
         if event.type == "text_delta":
             print(event.content, end="", flush=True)
         elif event.type == "tool_error":  # (2)!
             print(f"\n[Tool error: {event.error}]")
-    
+
     print()
 
 
@@ -352,7 +352,7 @@ from nagents.providers import OpenAIProvider
 async def web_search(query: str, num_results: int = 3) -> str:
     """
     Search the web for information.
-    
+
     Args:
         query: Search query
         num_results: Number of results to return (default 3)
@@ -374,7 +374,7 @@ notes: list[dict] = []
 def save_note(title: str, content: str) -> str:
     """
     Save a research note.
-    
+
     Args:
         title: Note title
         content: Note content
@@ -400,7 +400,7 @@ def list_notes() -> str:
 def summarize_text(text: str, max_sentences: int = 3) -> str:
     """
     Create a brief summary of text.
-    
+
     Args:
         text: Text to summarize
         max_sentences: Maximum number of sentences (default 3)
@@ -414,14 +414,14 @@ def summarize_text(text: str, max_sentences: int = 3) -> str:
 async def main():
     session_manager = SessionManager(Path("sessions.db"))
     session = await session_manager.create_session()
-    
+
     tools = [
         Tool.from_function(web_search),
         Tool.from_function(save_note),
         Tool.from_function(list_notes),
         Tool.from_function(summarize_text),
     ]
-    
+
     agent = Agent(
         provider=OpenAIProvider(model="gpt-4o"),
         session_manager=session_manager,
@@ -430,29 +430,29 @@ async def main():
         - Save notes about your findings
         - List saved notes
         - Summarize text
-        
+
         When researching a topic:
         1. Search for relevant information
         2. Save key findings as notes
         3. Provide a summary to the user""",
         tools=tools,
     )
-    
+
     print("Research Assistant Ready!")
     print("Type 'quit' to exit, 'notes' to see saved notes.\n")
-    
+
     while True:
         user_input = input("You: ").strip()
-        
+
         if user_input.lower() == "quit":
             break
-        
+
         if user_input.lower() == "notes":
             print(f"\nSaved Notes:\n{list_notes()}\n")
             continue
-        
+
         print("\nAssistant: ", end="", flush=True)
-        
+
         async for event in agent.run(user_input, session_id=session.id):
             match event.type:
                 case "text_delta":
@@ -461,7 +461,7 @@ async def main():
                     print(f"\n  📎 Using: {event.name}", end="")
                 case "tool_result":
                     print(" ✓", end="")
-        
+
         print("\n")
 
 

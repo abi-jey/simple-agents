@@ -80,7 +80,7 @@ git checkout -b fix/issue-description
 
 !!! tip "Branch Naming"
     Use descriptive branch names:
-    
+
     - `feature/add-streaming-support`
     - `fix/session-manager-memory-leak`
     - `docs/update-quickstart`
@@ -202,7 +202,7 @@ poetry run pytest -v
     async def test_create_session(session_manager: SessionManager):
         """Test session creation."""
         session = await session_manager.create_session()
-        
+
         assert session.id is not None
         assert session.created_at is not None
 
@@ -211,7 +211,7 @@ poetry run pytest -v
         """Test session creation with metadata."""
         metadata = {"user": "test", "purpose": "testing"}
         session = await session_manager.create_session(metadata=metadata)
-        
+
         assert session.metadata == metadata
     ```
 
@@ -237,10 +237,10 @@ poetry run pytest -v
     async def test_agent_response(agent: Agent):
         """Test that agent produces a response."""
         events = []
-        
+
         async for event in agent.run("Say 'hello'"):
             events.append(event)
-        
+
         # Should have at least a text event and completion
         assert any(e.type == "text_delta" for e in events)
         assert any(e.type == "message_complete" for e in events)
@@ -392,18 +392,18 @@ flowchart TD
 ### Reporting Bugs
 
 !!! bug "Bug Report Template"
-    
+
     **Description**: Clear description of the bug
-    
+
     **Steps to Reproduce**:
     1. Step one
     2. Step two
     3. ...
-    
+
     **Expected Behavior**: What should happen
-    
+
     **Actual Behavior**: What actually happens
-    
+
     **Environment**:
     - OS: [e.g., Ubuntu 22.04]
     - Python: [e.g., 3.11.4]
@@ -412,13 +412,13 @@ flowchart TD
 ### Feature Requests
 
 !!! tip "Feature Request Template"
-    
+
     **Problem**: What problem does this solve?
-    
+
     **Proposed Solution**: How should it work?
-    
+
     **Alternatives**: Other approaches considered
-    
+
     **Additional Context**: Any other information
 
 ## Release Process

@@ -178,7 +178,7 @@ The agent emits various events during execution. Here's how to handle them:
 agent = Agent(
     provider=provider,
     session_manager=session_manager,
-    system_prompt="""You are a Python expert. 
+    system_prompt="""You are a Python expert.
     - Always provide code examples
     - Explain concepts clearly
     - Suggest best practices""",
@@ -191,10 +191,10 @@ agent = Agent(
 
 !!! tip "Environment Variables"
     Never hardcode API keys. Use environment variables:
-    
+
     ```python
     import os
-    
+
     provider = OpenAIProvider(
         api_key=os.environ["OPENAI_API_KEY"],
         model="gpt-4o-mini",
@@ -203,7 +203,7 @@ agent = Agent(
 
 !!! tip "Error Handling"
     Always handle potential errors gracefully:
-    
+
     ```python
     try:
         async for event in agent.run(user_input):
@@ -217,7 +217,7 @@ agent = Agent(
 
 !!! tip "Session Management"
     For production applications, implement proper session lifecycle management:
-    
+
     ```python
     # Clean up old sessions periodically
     old_sessions = await session_manager.list_sessions(
