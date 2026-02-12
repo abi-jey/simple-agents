@@ -12,6 +12,8 @@ from typing import get_args
 from typing import get_origin
 from typing import get_type_hints
 
+from ..types import JsonSchema
+from ..types import JsonSchemaProperty
 from ..types import ToolDefinition
 
 logger = logging.getLogger(__name__)
@@ -75,7 +77,7 @@ class ToolRegistry:
         logger.debug(f"Registered tool: {tool_name}")
         return tool_def
 
-    def _extract_parameters(self, func: Callable[..., Any]) -> dict[str, Any]:
+    def _extract_parameters(self, func: Callable[..., Any]) -> JsonSchema:
         """
         Extract JSON Schema from function type hints.
 
@@ -92,7 +94,7 @@ class ToolRegistry:
 
         sig = inspect.signature(func)
 
-        properties: dict[str, Any] = {}
+        properties: dict[str, JsonSchemaProperty] = {}
         required: list[str] = []
 
         for param_name, param in sig.parameters.items():
@@ -111,7 +113,7 @@ class ToolRegistry:
             if param.default is inspect.Parameter.empty:
                 required.append(param_name)
 
-        schema: dict[str, Any] = {
+        schema: JsonSchema = {
             "type": "object",
             "properties": properties,
         }
@@ -121,7 +123,7 @@ class ToolRegistry:
 
         return schema
 
-    def _type_to_schema(self, t: Any) -> dict[str, Any]:
+    def _type_to_schema(self, t: Any) -> JsonSchemaProperty:
         """
         Convert Python type to JSON Schema.
 
@@ -147,29 +149,29 @@ class ToolRegistry:
         # Handle list[X]
         if origin is list:
             item_type = args[0] if args else str
-            return {
-                "type": "array",
-                "items": self._type_to_schema(item_type),
-            }
+            return JsonSchemaProperty(
+                type="array",
+                items=self._type_to_schema(item_type),
+            )
 
         # Handle dict[K, V]
         if origin is dict:
-            return {"type": "object"}
+            return JsonSchemaProperty(type="object")
 
         # Basic types
-        type_mapping = {
-            str: {"type": "string"},
-            int: {"type": "integer"},
-            float: {"type": "number"},
-            bool: {"type": "boolean"},
-            type(None): {"type": "null"},
+        type_mapping: dict[type, JsonSchemaProperty] = {
+            str: JsonSchemaProperty(type="string"),
+            int: JsonSchemaProperty(type="integer"),
+            float: JsonSchemaProperty(type="number"),
+            bool: JsonSchemaProperty(type="boolean"),
+            type(None): JsonSchemaProperty(type="null"),
         }
 
         if t in type_mapping:
             return type_mapping[t]
 
         # Default to string
-        return {"type": "string"}
+        return JsonSchemaProperty(type="string")
 
     def _extract_param_doc(self, func: Callable[..., Any], param_name: str) -> str | None:
         """

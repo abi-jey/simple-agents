@@ -113,7 +113,7 @@ async for event in agent.run(
 
 ## Handling Events
 
-nagents emits various event types during generation:
+nagents emits various event types during generation. All events include usage information (never None):
 
 ```python
 from nagents import (
@@ -121,7 +121,6 @@ from nagents import (
     TextDoneEvent,
     ToolCallEvent,
     ToolResultEvent,
-    UsageEvent,
     ErrorEvent,
     DoneEvent,
 )
@@ -133,10 +132,12 @@ async for event in agent.run("Hello"):
         print(f"Calling tool: {event.name}")
     elif isinstance(event, ToolResultEvent):
         print(f"Tool result: {event.result}")
-    elif isinstance(event, UsageEvent):
-        print(f"Tokens: {event.total_tokens}")
     elif isinstance(event, ErrorEvent):
         print(f"Error: {event.message}")
     elif isinstance(event, DoneEvent):
         print(f"Done! Final text: {len(event.final_text)} chars")
+        # Usage is always present (never None)
+        print(f"Tokens used: {event.usage.total_tokens}")
+        if event.usage.session:
+            print(f"Total session tokens: {event.usage.session.total_tokens}")
 ```

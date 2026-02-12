@@ -7,6 +7,45 @@ from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
 from typing import Literal
+from typing import TypedDict
+
+# =============================================================================
+# JSON and Schema Type Definitions
+# =============================================================================
+
+# Type alias for JSON-compatible values (used for API payloads and arguments)
+JsonValue = str | int | float | bool | None | list[Any] | dict[str, Any]
+
+# Type alias for tool arguments (always a dict mapping param names to values)
+ToolArguments = dict[str, JsonValue]
+
+
+class JsonSchemaProperty(TypedDict, total=False):
+    """JSON Schema property definition."""
+
+    type: str
+    description: str
+    enum: list[str]
+    items: "JsonSchemaProperty"
+    properties: dict[str, "JsonSchemaProperty"]
+    required: list[str]
+
+
+class JsonSchema(TypedDict, total=False):
+    """JSON Schema for tool parameters."""
+
+    type: str
+    properties: dict[str, JsonSchemaProperty]
+    required: list[str]
+    additionalProperties: bool
+
+
+class GeminiThinkingConfig(TypedDict, total=False):
+    """Gemini-specific thinking/reasoning configuration."""
+
+    thinkingBudget: int  # Maximum tokens for thinking
+    includeThoughts: bool  # Whether to include thoughts in response
+
 
 # =============================================================================
 # Multimodal Content Types
@@ -75,7 +114,7 @@ class ToolCall:
 
     id: str
     name: str
-    arguments: dict[str, Any] = field(default_factory=dict)
+    arguments: ToolArguments = field(default_factory=dict)
 
 
 @dataclass
@@ -84,7 +123,7 @@ class ToolDefinition:
 
     name: str
     description: str
-    parameters: dict[str, Any]  # JSON Schema
+    parameters: JsonSchema  # JSON Schema for function parameters
     func: Callable[..., Any] | None = None  # The actual callable (not sent to API)
 
 
@@ -107,15 +146,6 @@ class Message:
 
 
 @dataclass
-class Usage:
-    """Token usage statistics."""
-
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
-
-
-@dataclass
 class GenerationConfig:
     """Configuration for generation."""
 
@@ -124,4 +154,4 @@ class GenerationConfig:
     top_p: float | None = None
     stop: list[str] | None = None
     # Gemini-specific
-    thinking_config: dict[str, Any] | None = None
+    thinking_config: GeminiThinkingConfig | None = None

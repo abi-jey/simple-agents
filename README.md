@@ -1,5 +1,12 @@
 # nagents
 
+[![PyPI version](https://img.shields.io/pypi/v/nagents.svg)](https://pypi.org/project/nagents/)
+[![Python versions](https://img.shields.io/pypi/pyversions/nagents.svg)](https://pypi.org/project/nagents/)
+[![CI](https://github.com/abi-jey/nagents/actions/workflows/ci.yml/badge.svg)](https://github.com/abi-jey/nagents/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/abi-jey/nagents/branch/main/graph/badge.svg)](https://codecov.io/gh/abi-jey/nagents)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Docs](https://img.shields.io/badge/docs-mkdocs-blue.svg)](https://abi-jey.github.io/nagents/)
+
 A lightweight LLM agent framework with direct HTTP-based provider integration.
 
 ## Features

@@ -50,6 +50,9 @@ from .types import BatchRequest
 from .types import BatchRequestCounts
 from .types import BatchResult
 from .types import BatchStatus
+from .types import BatchToolCall
+from .types import ToolCallFunction
+from .types import UsageInfo
 
 __all__ = [
     "BatchClient",
@@ -61,4 +64,7 @@ __all__ = [
     "BatchResult",
     "BatchStatus",
     "BatchStore",
+    "BatchToolCall",
+    "ToolCallFunction",
+    "UsageInfo",
 ]

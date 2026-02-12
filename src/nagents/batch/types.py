@@ -10,10 +10,34 @@ from dataclasses import field
 from enum import Enum
 from typing import Any
 from typing import Literal
+from typing import TypedDict
 
 from ..types import GenerationConfig
 from ..types import Message
 from ..types import ToolDefinition
+
+
+class ToolCallFunction(TypedDict):
+    """Function details in a tool call."""
+
+    name: str
+    arguments: str  # JSON-encoded arguments
+
+
+class BatchToolCall(TypedDict):
+    """Tool call structure from batch results (OpenAI format)."""
+
+    id: str
+    type: Literal["function"]
+    function: ToolCallFunction
+
+
+class UsageInfo(TypedDict, total=False):
+    """Token usage information."""
+
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
 
 
 class BatchStatus(Enum):
@@ -118,8 +142,8 @@ class BatchResult:
 
     # For succeeded results
     content: str | None = None
-    tool_calls: list[dict[str, Any]] | None = None
-    usage: dict[str, int] | None = None
+    tool_calls: list[BatchToolCall] | None = None
+    usage: UsageInfo | None = None
 
     # For errored results
     error_type: str | None = None

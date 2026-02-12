@@ -83,6 +83,44 @@ def risky_operation(param: str) -> str:
 
 The `ToolResultEvent` will have `error` set instead of `result`.
 
+## Handling Tool Hallucinations
+
+Sometimes LLMs may attempt to call tools that don't exist ("hallucinated" tools). By default, nagents returns an error message to the LLM listing available tools, allowing it to self-correct:
+
+```python
+# Default behavior: LLM receives error and can retry
+agent = Agent(
+    provider=provider,
+    tools=[get_weather],  # Only get_weather is available
+)
+# If LLM tries to call "search_database", it gets:
+# "Unknown tool: search_database. Available tools: get_weather"
+```
+
+For stricter control, you can raise an exception when this happens:
+
+```python
+from nagents import Agent, ToolHallucinationError
+
+agent = Agent(
+    provider=provider,
+    tools=[get_weather],
+    fail_on_invalid_tool=True,  # Raise exception on unknown tools
+)
+
+try:
+    async for event in agent.run("Search for restaurants"):
+        # Process events...
+        pass
+except ToolHallucinationError as e:
+    print(f"LLM tried to call unknown tool: {e.tool_name}")
+    print(f"Available tools were: {e.available_tools}")
+```
+
+The `ToolHallucinationError` includes:
+- `tool_name`: The name of the unknown tool the LLM tried to call
+- `available_tools`: List of tools that were actually available
+
 ## Complex Parameters
 
 Tools can have complex parameter types:

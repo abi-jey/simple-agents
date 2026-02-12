@@ -6,6 +6,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from .events import DoneEvent
@@ -13,7 +14,11 @@ from .events import ErrorEvent
 from .events import Event
 from .events import TextChunkEvent
 from .events import TextDoneEvent
+from .events import TokenUsage
 from .events import ToolCallEvent
+from .events import Usage
+from .exceptions import ToolHallucinationError
+from .http import FileHTTPLogger
 from .provider import Provider
 from .session import SessionManager
 from .tools import ToolExecutor
@@ -73,6 +78,9 @@ class Agent:
         tools: list[Callable[..., Any]] | None = None,
         system_prompt: str | None = None,
         max_tool_rounds: int = 10,
+        streaming: bool = False,
+        log_file: Path | str | None = None,
+        fail_on_invalid_tool: bool = False,
     ):
         """
         Initialize the agent.
@@ -83,16 +91,33 @@ class Agent:
             tools: Optional list of tool functions to register
             system_prompt: Optional system prompt to prepend to conversations
             max_tool_rounds: Maximum number of tool execution rounds
+            streaming: Whether to stream responses (default: False)
+            log_file: Optional path to log file for HTTP/SSE traffic debugging.
+                      Creates parent directories if they don't exist.
+            fail_on_invalid_tool: If True, emit an error and stop when the LLM
+                                  tries to call a tool that doesn't exist (tool
+                                  hallucination). If False (default), the error
+                                  is passed back to the LLM so it can recover.
         """
         self.provider = provider
         self.session = session_manager
         self.system_prompt = system_prompt
         self.max_tool_rounds = max_tool_rounds
+        self.streaming = streaming
+        self.fail_on_invalid_tool = fail_on_invalid_tool
 
         self.tool_registry = ToolRegistry()
         self.tool_executor = ToolExecutor(self.tool_registry)
 
         self._initialized = False
+        self._http_logger: FileHTTPLogger | None = None
+
+        # Set up HTTP logging if log_file is provided
+        if log_file:
+            log_path = Path(log_file) if isinstance(log_file, str) else log_file
+            self._http_logger = FileHTTPLogger(log_path)
+            self.provider.set_http_logger(self._http_logger)
+            logger.info(f"HTTP logging enabled: {log_path}")
 
         if tools:
             for tool in tools:
@@ -204,7 +229,13 @@ class Agent:
         # Add user message to history
         await self.session.add_message(session_id, Message(role="user", content=user_message))
 
+        # Set session ID for HTTP logging
+        self.provider.set_session_id(session_id)
+
         tools = self.tool_registry.get_all() if self.tool_registry.has_tools() else None
+
+        # Track last known usage to use for events without usage data
+        last_usage = Usage()
 
         for round_num in range(self.max_tool_rounds):
             logger.debug(f"Generation round {round_num + 1}/{self.max_tool_rounds}")
@@ -227,8 +258,30 @@ class Agent:
                 messages=messages,
                 tools=tools,
                 config=config,
-                stream=True,
+                stream=self.streaming,
             ):
+                # Track usage from events that have actual token counts
+                if event.usage.has_usage():
+                    last_usage = Usage(
+                        prompt_tokens=event.usage.prompt_tokens,
+                        completion_tokens=event.usage.completion_tokens,
+                        total_tokens=event.usage.total_tokens,
+                    )
+                else:
+                    # Use last known usage for events without usage data
+                    event.usage = Usage(
+                        prompt_tokens=last_usage.prompt_tokens,
+                        completion_tokens=last_usage.completion_tokens,
+                        total_tokens=last_usage.total_tokens,
+                    )
+
+                # For now, session equals current usage (TODO: accumulate across compactions)
+                event.usage.session = TokenUsage(
+                    prompt_tokens=last_usage.prompt_tokens,
+                    completion_tokens=last_usage.completion_tokens,
+                    total_tokens=last_usage.total_tokens,
+                )
+
                 yield event  # Always emit events to caller
 
                 if isinstance(event, TextChunkEvent):
@@ -246,7 +299,20 @@ class Agent:
                 elif isinstance(event, ErrorEvent):
                     has_error = True
                     if not event.recoverable:
-                        yield DoneEvent(final_text="", session_id=session_id)
+                        yield DoneEvent(
+                            final_text="",
+                            session_id=session_id,
+                            usage=Usage(
+                                prompt_tokens=last_usage.prompt_tokens,
+                                completion_tokens=last_usage.completion_tokens,
+                                total_tokens=last_usage.total_tokens,
+                                session=TokenUsage(
+                                    prompt_tokens=last_usage.prompt_tokens,
+                                    completion_tokens=last_usage.completion_tokens,
+                                    total_tokens=last_usage.total_tokens,
+                                ),
+                            ),
+                        )
                         return
 
             # If we hit an error, don't continue
@@ -265,7 +331,27 @@ class Agent:
                 for tool_call in pending_tool_calls:
                     logger.debug(f"Executing tool: {tool_call.name}")
                     result_event = await self.tool_executor.execute(tool_call)
+                    # Attach last known usage info to tool result events
+                    result_event.usage = Usage(
+                        prompt_tokens=last_usage.prompt_tokens,
+                        completion_tokens=last_usage.completion_tokens,
+                        total_tokens=last_usage.total_tokens,
+                        session=TokenUsage(
+                            prompt_tokens=last_usage.prompt_tokens,
+                            completion_tokens=last_usage.completion_tokens,
+                            total_tokens=last_usage.total_tokens,
+                        ),
+                    )
                     yield result_event
+
+                    # Check for invalid tool (hallucination) and raise if configured
+                    if result_event.error and self.fail_on_invalid_tool and "does not exist" in result_event.error:
+                        logger.error(f"Tool hallucination detected: {tool_call.name}")
+                        raise ToolHallucinationError(
+                            tool_name=tool_call.name,
+                            available_tools=self.tool_registry.names(),
+                            message=result_event.error,
+                        )
 
                     # Add tool result to history
                     result_content = (
@@ -288,7 +374,20 @@ class Agent:
             if full_text:
                 await self.session.add_message(session_id, Message(role="assistant", content=full_text))
 
-            yield DoneEvent(final_text=full_text, session_id=session_id)
+            yield DoneEvent(
+                final_text=full_text,
+                session_id=session_id,
+                usage=Usage(
+                    prompt_tokens=last_usage.prompt_tokens,
+                    completion_tokens=last_usage.completion_tokens,
+                    total_tokens=last_usage.total_tokens,
+                    session=TokenUsage(
+                        prompt_tokens=last_usage.prompt_tokens,
+                        completion_tokens=last_usage.completion_tokens,
+                        total_tokens=last_usage.total_tokens,
+                    ),
+                ),
+            )
             return
 
         # Hit max rounds
@@ -296,8 +395,31 @@ class Agent:
         yield ErrorEvent(
             message=f"Max tool rounds ({self.max_tool_rounds}) exceeded",
             recoverable=False,
+            usage=Usage(
+                prompt_tokens=last_usage.prompt_tokens,
+                completion_tokens=last_usage.completion_tokens,
+                total_tokens=last_usage.total_tokens,
+                session=TokenUsage(
+                    prompt_tokens=last_usage.prompt_tokens,
+                    completion_tokens=last_usage.completion_tokens,
+                    total_tokens=last_usage.total_tokens,
+                ),
+            ),
         )
-        yield DoneEvent(final_text="", session_id=session_id)
+        yield DoneEvent(
+            final_text="",
+            session_id=session_id,
+            usage=Usage(
+                prompt_tokens=last_usage.prompt_tokens,
+                completion_tokens=last_usage.completion_tokens,
+                total_tokens=last_usage.total_tokens,
+                session=TokenUsage(
+                    prompt_tokens=last_usage.prompt_tokens,
+                    completion_tokens=last_usage.completion_tokens,
+                    total_tokens=last_usage.total_tokens,
+                ),
+            ),
+        )
 
     async def run_simple(
         self,
@@ -323,12 +445,41 @@ class Agent:
 
         tools = self.tool_registry.get_all() if self.tool_registry.has_tools() else None
 
+        # For simple runs, session_usage equals usage (single generation)
+        session_usage = TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
+        # Track last known usage to use for events without usage data
+        last_usage = Usage()
+
         async for event in self.provider.generate(
             messages=messages,
             tools=tools,
             config=config,
-            stream=True,
+            stream=self.streaming,
         ):
+            # Track usage from events that have actual token counts
+            if event.usage.has_usage():
+                # For simple runs, session_usage = current usage
+                session_usage = TokenUsage(
+                    prompt_tokens=event.usage.prompt_tokens,
+                    completion_tokens=event.usage.completion_tokens,
+                    total_tokens=event.usage.total_tokens,
+                )
+                last_usage = Usage(
+                    prompt_tokens=event.usage.prompt_tokens,
+                    completion_tokens=event.usage.completion_tokens,
+                    total_tokens=event.usage.total_tokens,
+                )
+            else:
+                # Use last known usage for events without usage data
+                event.usage = Usage(
+                    prompt_tokens=last_usage.prompt_tokens,
+                    completion_tokens=last_usage.completion_tokens,
+                    total_tokens=last_usage.total_tokens,
+                )
+
+            # Always attach session usage to the event
+            event.usage.session = session_usage
+
             yield event
 
     async def clear_session(self, session_id: str) -> None:

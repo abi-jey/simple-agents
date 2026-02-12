@@ -10,6 +10,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from enum import Enum
+from typing import TYPE_CHECKING
 from typing import Any
 
 from ..adapters import openai as openai_adapter
@@ -18,13 +19,16 @@ from ..events import Event
 from ..events import TextChunkEvent
 from ..events import TextDoneEvent
 from ..events import ToolCallEvent
-from ..events import UsageEvent
+from ..events import Usage
 from ..http import HTTPClient
 from ..http import HTTPError
 from ..types import GenerationConfig
 from ..types import Message
 from ..types import ToolCall
 from ..types import ToolDefinition
+
+if TYPE_CHECKING:
+    from ..http import HTTPLogger
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +91,24 @@ class Provider:
             self.base_url = "https://generativelanguage.googleapis.com/v1beta"
         if not self.api_key:
             raise ValueError("API key is required for provider initialization")
+
+    def set_http_logger(self, http_logger: "HTTPLogger | None") -> None:
+        """
+        Set the HTTP logger for debugging/auditing.
+
+        Args:
+            http_logger: The HTTP logger to use, or None to disable logging.
+        """
+        self._http.set_logger(http_logger)
+
+    def set_session_id(self, session_id: str | None) -> None:
+        """
+        Set the current session ID for HTTP logging.
+
+        Args:
+            session_id: The session ID to include in log entries.
+        """
+        self._http.set_session_id(session_id)
 
     async def verify_model(self, force: bool = False) -> bool:
         """Verify that the specified model exists in model list endpoint.
@@ -258,6 +280,10 @@ class Provider:
             "stream": stream,
         }
 
+        # Request usage data in streaming responses
+        if stream:
+            body["stream_options"] = {"include_usage": True}
+
         if tools:
             body["tools"] = openai_adapter.format_tools(tools)
 
@@ -287,6 +313,7 @@ class Provider:
         """Handle streaming OpenAI response."""
         full_text = ""
         tool_accumulator = openai_adapter.StreamingToolCallAccumulator()
+        latest_usage = Usage()
 
         async for data in self._http.post_stream(url, body, headers):
             if data == "[DONE]":
@@ -296,6 +323,15 @@ class Provider:
                 chunk = json.loads(data)
             except json.JSONDecodeError:
                 continue
+
+            # Handle usage (OpenAI sends this in a separate final chunk with empty choices)
+            usage = chunk.get("usage")
+            if usage:
+                latest_usage = Usage(
+                    prompt_tokens=usage.get("prompt_tokens", 0),
+                    completion_tokens=usage.get("completion_tokens", 0),
+                    total_tokens=usage.get("total_tokens", 0),
+                )
 
             choices = chunk.get("choices", [])
             if not choices:
@@ -309,20 +345,11 @@ class Provider:
             content = delta.get("content")
             if content:
                 full_text += content
-                yield TextChunkEvent(chunk=content)
+                yield TextChunkEvent(chunk=content, usage=latest_usage)
 
             # Handle tool calls
             if "tool_calls" in delta:
                 tool_accumulator.add_delta(delta)
-
-            # Handle usage (some providers include it in stream)
-            usage = chunk.get("usage")
-            if usage:
-                yield UsageEvent(
-                    prompt_tokens=usage.get("prompt_tokens", 0),
-                    completion_tokens=usage.get("completion_tokens", 0),
-                    total_tokens=usage.get("total_tokens", 0),
-                )
 
         # Emit accumulated tool calls
         tool_calls = tool_accumulator.get_complete_tool_calls()
@@ -332,9 +359,10 @@ class Provider:
                     id=tc.id,
                     name=tc.name,
                     arguments=tc.arguments,
+                    usage=latest_usage,
                 )
         elif full_text:
-            yield TextDoneEvent(text=full_text)
+            yield TextDoneEvent(text=full_text, usage=latest_usage)
 
     async def _non_stream_openai(
         self,
@@ -353,6 +381,16 @@ class Provider:
         choice = choices[0]
         message = choice.get("message", {})
 
+        # Handle usage
+        latest_usage = Usage()
+        usage = response.get("usage")
+        if usage:
+            latest_usage = Usage(
+                prompt_tokens=usage.get("prompt_tokens", 0),
+                completion_tokens=usage.get("completion_tokens", 0),
+                total_tokens=usage.get("total_tokens", 0),
+            )
+
         # Handle tool calls
         tool_calls = openai_adapter.parse_tool_calls(choice)
         if tool_calls:
@@ -361,21 +399,13 @@ class Provider:
                     id=tc.id,
                     name=tc.name,
                     arguments=tc.arguments,
+                    usage=latest_usage,
                 )
         else:
             # Handle text response
             content = message.get("content", "")
             if content:
-                yield TextDoneEvent(text=content)
-
-        # Handle usage
-        usage = response.get("usage")
-        if usage:
-            yield UsageEvent(
-                prompt_tokens=usage.get("prompt_tokens", 0),
-                completion_tokens=usage.get("completion_tokens", 0),
-                total_tokens=usage.get("total_tokens", 0),
-            )
+                yield TextDoneEvent(text=content, usage=latest_usage)
 
     async def _generate_gemini(
         self,
@@ -416,6 +446,7 @@ class Provider:
 
         full_text = ""
         all_tool_calls: list[ToolCall] = []
+        latest_usage = Usage()
 
         async for data in self._http.post_stream(url, body, headers):
             try:
@@ -425,19 +456,19 @@ class Provider:
 
             text, tool_calls, usage = gemini_adapter.parse_response(chunk)
 
-            if text:
-                full_text += text
-                yield TextChunkEvent(chunk=text)
-
-            if tool_calls:
-                all_tool_calls.extend(tool_calls)
-
             if usage:
-                yield UsageEvent(
+                latest_usage = Usage(
                     prompt_tokens=usage.get("promptTokenCount", 0),
                     completion_tokens=usage.get("candidatesTokenCount", 0),
                     total_tokens=usage.get("totalTokenCount", 0),
                 )
+
+            if text:
+                full_text += text
+                yield TextChunkEvent(chunk=text, usage=latest_usage)
+
+            if tool_calls:
+                all_tool_calls.extend(tool_calls)
 
         # Emit tool calls
         if all_tool_calls:
@@ -446,9 +477,10 @@ class Provider:
                     id=tc.id,
                     name=tc.name,
                     arguments=tc.arguments,
+                    usage=latest_usage,
                 )
         elif full_text:
-            yield TextDoneEvent(text=full_text)
+            yield TextDoneEvent(text=full_text, usage=latest_usage)
 
     async def _non_stream_gemini(
         self,
@@ -462,22 +494,25 @@ class Provider:
         response = await self._http.post_json(url, body, headers)
         text, tool_calls, usage = gemini_adapter.parse_response(response)
 
+        # Parse usage
+        latest_usage = Usage()
+        if usage:
+            latest_usage = Usage(
+                prompt_tokens=usage.get("promptTokenCount", 0),
+                completion_tokens=usage.get("candidatesTokenCount", 0),
+                total_tokens=usage.get("totalTokenCount", 0),
+            )
+
         if tool_calls:
             for tc in tool_calls:
                 yield ToolCallEvent(
                     id=tc.id,
                     name=tc.name,
                     arguments=tc.arguments,
+                    usage=latest_usage,
                 )
         elif text:
-            yield TextDoneEvent(text=text)
-
-        if usage:
-            yield UsageEvent(
-                prompt_tokens=usage.get("promptTokenCount", 0),
-                completion_tokens=usage.get("candidatesTokenCount", 0),
-                total_tokens=usage.get("totalTokenCount", 0),
-            )
+            yield TextDoneEvent(text=text, usage=latest_usage)
 
     async def _generate_anthropic(
         self,
@@ -539,6 +574,7 @@ class Provider:
         full_text = ""
         tool_accumulator = anthropic_adapter.StreamingToolCallAccumulator()
         current_block_index = 0
+        latest_usage = Usage()
 
         async for data in self._http.post_stream(url, body, headers):
             try:
@@ -572,7 +608,7 @@ class Provider:
                     text = delta.get("text", "")
                     if text:
                         full_text += text
-                        yield TextChunkEvent(chunk=text)
+                        yield TextChunkEvent(chunk=text, usage=latest_usage)
 
                 elif delta_type == "input_json_delta":
                     # Tool call argument fragment
@@ -583,7 +619,7 @@ class Provider:
                 # Message-level update (contains usage info at end)
                 usage = chunk.get("usage")
                 if usage:
-                    yield UsageEvent(
+                    latest_usage = Usage(
                         prompt_tokens=usage.get("input_tokens", 0),
                         completion_tokens=usage.get("output_tokens", 0),
                         total_tokens=usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
@@ -595,7 +631,7 @@ class Provider:
                 usage = message.get("usage")
                 if usage:
                     # Initial input tokens
-                    yield UsageEvent(
+                    latest_usage = Usage(
                         prompt_tokens=usage.get("input_tokens", 0),
                         completion_tokens=0,
                         total_tokens=usage.get("input_tokens", 0),
@@ -609,9 +645,10 @@ class Provider:
                     id=tc.id,
                     name=tc.name,
                     arguments=tc.arguments,
+                    usage=latest_usage,
                 )
         elif full_text:
-            yield TextDoneEvent(text=full_text)
+            yield TextDoneEvent(text=full_text, usage=latest_usage)
 
     async def _non_stream_anthropic(
         self,
@@ -625,22 +662,25 @@ class Provider:
         response = await self._http.post_json(url, body, headers)
         text, tool_calls, usage = anthropic_adapter.parse_response(response)
 
+        # Parse usage
+        latest_usage = Usage()
+        if usage:
+            latest_usage = Usage(
+                prompt_tokens=usage.get("input_tokens", 0),
+                completion_tokens=usage.get("output_tokens", 0),
+                total_tokens=usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
+            )
+
         if tool_calls:
             for tc in tool_calls:
                 yield ToolCallEvent(
                     id=tc.id,
                     name=tc.name,
                     arguments=tc.arguments,
+                    usage=latest_usage,
                 )
         elif text:
-            yield TextDoneEvent(text=text)
-
-        if usage:
-            yield UsageEvent(
-                prompt_tokens=usage.get("input_tokens", 0),
-                completion_tokens=usage.get("output_tokens", 0),
-                total_tokens=usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
-            )
+            yield TextDoneEvent(text=text, usage=latest_usage)
 
     async def close(self) -> None:
         """Close the provider and release resources."""

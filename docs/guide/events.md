@@ -1,6 +1,6 @@
 # Events
 
-nagents uses an event-based streaming architecture.
+nagents uses an event-based streaming architecture. All events include optional usage information.
 
 ## Event Types
 
@@ -10,9 +10,51 @@ nagents uses an event-based streaming architecture.
 | `TextDoneEvent` | Complete text (non-streaming) |
 | `ToolCallEvent` | Model is calling a tool |
 | `ToolResultEvent` | Tool execution completed |
-| `UsageEvent` | Token usage statistics |
 | `ErrorEvent` | Error occurred |
 | `DoneEvent` | Generation complete |
+
+## Base Event
+
+All events inherit from `Event` and include usage information:
+
+```python
+@dataclass
+class Event:
+    type: EventType
+    timestamp: datetime
+    usage: Usage  # Token usage (always present, never None)
+```
+
+## Usage Information
+
+Usage is available on all events and includes both current generation and session totals:
+
+```python
+@dataclass
+class TokenUsage:
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+@dataclass
+class Usage:
+    prompt_tokens: int      # Current generation
+    completion_tokens: int  # Current generation
+    total_tokens: int       # Current generation
+    session: TokenUsage | None  # Cumulative across tool rounds
+
+    def has_usage(self) -> bool:
+        """Check if this usage has any actual token counts."""
+        ...
+```
+
+```python
+async for event in agent.run("Hello"):
+    # Usage is always present on events (never None)
+    print(f"Current: {event.usage.total_tokens} tokens")
+    if event.usage.session:
+        print(f"Session total: {event.usage.session.total_tokens} tokens")
+```
 
 ## TextChunkEvent
 
@@ -47,7 +89,7 @@ Emitted when the model calls a tool:
 ```python
 @dataclass
 class ToolCallEvent:
-    call_id: str          # Unique call identifier
+    id: str               # Unique call identifier
     name: str             # Tool function name
     arguments: dict       # Tool arguments
 ```
@@ -64,7 +106,7 @@ Emitted after tool execution:
 ```python
 @dataclass
 class ToolResultEvent:
-    call_id: str          # Matches ToolCallEvent.call_id
+    id: str               # Matches ToolCallEvent.id
     name: str             # Tool function name
     result: Any           # Tool return value
     error: str | None     # Error message if failed
@@ -77,18 +119,6 @@ if isinstance(event, ToolResultEvent):
         print(f"Tool failed: {event.error}")
     else:
         print(f"Tool result: {event.result} ({event.duration_ms}ms)")
-```
-
-## UsageEvent
-
-Emitted with token usage statistics:
-
-```python
-@dataclass
-class UsageEvent:
-    prompt_tokens: int      # Input tokens
-    completion_tokens: int  # Output tokens
-    total_tokens: int       # Total tokens
 ```
 
 ## ErrorEvent
@@ -125,10 +155,10 @@ async for event in agent.run("What's 2+2?"):
             print(f"\n[Calling {name}...]")
         case ToolResultEvent(result=result, duration_ms=ms):
             print(f"[Result: {result} in {ms}ms]")
-        case UsageEvent(total_tokens=tokens):
-            print(f"\n[Tokens: {tokens}]")
         case ErrorEvent(message=msg):
             print(f"\n[Error: {msg}]")
-        case DoneEvent(final_text=text):
+        case DoneEvent(final_text=text, usage=usage):
             print(f"\n[Done: {len(text)} chars]")
+            if usage.session:
+                print(f"[Total tokens: {usage.session.total_tokens}]")
 ```

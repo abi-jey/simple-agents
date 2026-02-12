@@ -80,3 +80,42 @@ OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 GOOGLE_API_KEY=...
 ```
+
+## HTTP Traffic Logging
+
+For debugging, you can log all HTTP requests, responses, and SSE chunks to a file:
+
+```python
+agent = Agent(
+    provider=provider,
+    log_file="http_traffic.log",  # Enable HTTP logging
+)
+
+async for event in agent.run("Hello"):
+    ...
+```
+
+The log file will contain timestamped entries for:
+- **Requests**: Method, URL, headers, and body
+- **Responses**: Status code, headers, and body
+- **SSE chunks**: Individual server-sent events during streaming
+
+Each agent run creates a unique session ID to group related requests:
+
+```
+================================================================================
+[2024-01-15 10:30:45.123] SESSION: a1b2c3d4
+================================================================================
+
+--- REQUEST ---
+[10:30:45.124] POST https://api.openai.com/v1/chat/completions
+Headers: {...}
+Body: {...}
+
+--- RESPONSE ---
+[10:30:45.456] Status: 200
+Headers: {...}
+
+--- SSE CHUNK ---
+[10:30:45.460] data: {"choices":[...]}
+```

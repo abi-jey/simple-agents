@@ -54,6 +54,10 @@ Example:
             print(f"Result: {event.result}")
         elif isinstance(event, DoneEvent):
             print(f"\\nDone (session: {event.session_id})")
+            # Usage is always available on all events (never None)
+            print(f"Tokens this generation: {event.usage.total_tokens}")
+            if event.usage.session:
+                print(f"Total session tokens: {event.usage.session.total_tokens}")
 
     # Don't forget to close when done
     await agent.close()
@@ -101,15 +105,23 @@ from .batch import BatchRequestCounts
 from .batch import BatchResult
 from .batch import BatchStatus
 from .batch import BatchStore
+from .batch import BatchToolCall
+from .batch import ToolCallFunction
+from .batch import UsageInfo
 from .events import DoneEvent
 from .events import ErrorEvent
 from .events import Event
 from .events import EventType
 from .events import TextChunkEvent
 from .events import TextDoneEvent
+from .events import TokenUsage
 from .events import ToolCallEvent
 from .events import ToolResultEvent
-from .events import UsageEvent
+from .events import ToolResultType
+from .events import Usage
+from .exceptions import NagentsError
+from .exceptions import ToolHallucinationError
+from .http import FileHTTPLogger
 from .provider import Provider
 from .provider import ProviderType
 from .session import SessionManager
@@ -118,13 +130,17 @@ from .tools import ToolRegistry
 from .types import AudioContent
 from .types import ContentPart
 from .types import DocumentContent
+from .types import GeminiThinkingConfig
 from .types import GenerationConfig
 from .types import ImageContent
+from .types import JsonSchema
+from .types import JsonSchemaProperty
+from .types import JsonValue
 from .types import Message
 from .types import TextContent
+from .types import ToolArguments
 from .types import ToolCall
 from .types import ToolDefinition
-from .types import Usage
 
 __all__ = [
     "Agent",
@@ -138,27 +154,39 @@ __all__ = [
     "BatchResult",
     "BatchStatus",
     "BatchStore",
+    "BatchToolCall",
     "ContentPart",
     "DocumentContent",
     "DoneEvent",
     "ErrorEvent",
     "Event",
     "EventType",
+    "FileHTTPLogger",
+    "GeminiThinkingConfig",
     "GenerationConfig",
     "ImageContent",
+    "JsonSchema",
+    "JsonSchemaProperty",
+    "JsonValue",
     "Message",
+    "NagentsError",
     "Provider",
     "ProviderType",
     "SessionManager",
     "TextChunkEvent",
     "TextContent",
     "TextDoneEvent",
+    "TokenUsage",
+    "ToolArguments",
     "ToolCall",
     "ToolCallEvent",
+    "ToolCallFunction",
     "ToolDefinition",
     "ToolExecutor",
+    "ToolHallucinationError",
     "ToolRegistry",
     "ToolResultEvent",
+    "ToolResultType",
     "Usage",
-    "UsageEvent",
+    "UsageInfo",
 ]

@@ -54,10 +54,16 @@ class ToolExecutor:
         tool = self._registry.get(tool_call.name)
 
         if not tool or not tool.func:
+            available_tools = self._registry.names()
+            if available_tools:
+                tools_list = ", ".join(available_tools)
+                error_msg = f"Tool '{tool_call.name}' does not exist. Available tools: {tools_list}"
+            else:
+                error_msg = f"Tool '{tool_call.name}' does not exist. No tools are registered."
             return ToolResultEvent(
                 id=tool_call.id,
                 name=tool_call.name,
-                error=f"Unknown tool: {tool_call.name}",
+                error=error_msg,
                 duration_ms=(time.monotonic() - start) * 1000,
             )
 

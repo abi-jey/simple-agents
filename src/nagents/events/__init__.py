@@ -6,9 +6,11 @@ from .types import Event
 from .types import EventType
 from .types import TextChunkEvent
 from .types import TextDoneEvent
+from .types import TokenUsage
 from .types import ToolCallEvent
 from .types import ToolResultEvent
-from .types import UsageEvent
+from .types import ToolResultType
+from .types import Usage
 
 __all__ = [
     "DoneEvent",
@@ -17,7 +19,9 @@ __all__ = [
     "EventType",
     "TextChunkEvent",
     "TextDoneEvent",
+    "TokenUsage",
     "ToolCallEvent",
     "ToolResultEvent",
-    "UsageEvent",
+    "ToolResultType",
+    "Usage",
 ]

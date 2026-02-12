@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 from nagents import Agent
 from nagents import DoneEvent
 from nagents import ErrorEvent
+from nagents import FileHTTPLogger
 from nagents import GenerationConfig
 from nagents import Message
 from nagents import Provider
@@ -13,10 +14,11 @@ from nagents import ProviderType
 from nagents import SessionManager
 from nagents import TextChunkEvent
 from nagents import TextDoneEvent
+from nagents import TokenUsage
 from nagents import ToolCallEvent
 from nagents import ToolDefinition
 from nagents import ToolResultEvent
-from nagents import UsageEvent
+from nagents import Usage
 
 
 class TestTypes:
@@ -102,16 +104,51 @@ class TestEvents:
         assert event.duration_ms == 10.5
         assert event.error is None
 
-    def test_usage_event(self) -> None:
-        """Test UsageEvent creation."""
-        event = UsageEvent(
+    def test_usage(self) -> None:
+        """Test Usage creation with session."""
+        session = TokenUsage(prompt_tokens=200, completion_tokens=100, total_tokens=300)
+        usage = Usage(
             prompt_tokens=100,
             completion_tokens=50,
             total_tokens=150,
+            session=session,
         )
-        assert event.prompt_tokens == 100
-        assert event.completion_tokens == 50
-        assert event.total_tokens == 150
+        assert usage.prompt_tokens == 100
+        assert usage.completion_tokens == 50
+        assert usage.total_tokens == 150
+        assert usage.has_usage() is True
+        assert usage.session is not None
+        assert usage.session.total_tokens == 300
+
+    def test_usage_default(self) -> None:
+        """Test Usage default values."""
+        usage = Usage()
+        assert usage.prompt_tokens == 0
+        assert usage.completion_tokens == 0
+        assert usage.total_tokens == 0
+        assert usage.has_usage() is False
+        assert usage.session is None
+
+    def test_event_with_usage(self) -> None:
+        """Test Event with usage containing session."""
+        session = TokenUsage(prompt_tokens=200, completion_tokens=100, total_tokens=300)
+        usage = Usage(
+            prompt_tokens=100,
+            completion_tokens=50,
+            total_tokens=150,
+            session=session,
+        )
+        event = TextChunkEvent(chunk="Hello", usage=usage)
+        assert event.usage.prompt_tokens == 100
+        assert event.usage.session is not None
+        assert event.usage.session.total_tokens == 300
+
+    def test_event_default_usage(self) -> None:
+        """Test Event has default usage that is never None."""
+        event = TextChunkEvent(chunk="Hello")
+        # Usage is always present, never None
+        assert event.usage.prompt_tokens == 0
+        assert event.usage.has_usage() is False
 
     def test_error_event(self) -> None:
         """Test ErrorEvent creation."""
@@ -220,3 +257,110 @@ class TestAgent:
                 system_prompt="You are a helpful assistant.",
             )
             assert agent.system_prompt == "You are a helpful assistant."
+
+    def test_agent_with_log_file(self) -> None:
+        """Test Agent with HTTP logging enabled."""
+        with TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "logs" / "http.log"
+            provider = Provider(
+                provider_type=ProviderType.OPENAI_COMPATIBLE,
+                api_key="test-key",
+                model="gpt-4o-mini",
+            )
+            session_manager = SessionManager(Path(tmpdir) / "sessions.db")
+            agent = Agent(
+                provider=provider,
+                session_manager=session_manager,
+                log_file=log_path,
+            )
+            # Check that log file and parent dirs were created
+            assert log_path.exists()
+            assert agent._http_logger is not None
+
+
+class TestHTTPLogger:
+    """Test HTTP logging functionality."""
+
+    def test_file_logger_creates_dirs(self) -> None:
+        """Test that FileHTTPLogger creates parent directories."""
+        with TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "nested" / "dirs" / "http.log"
+            FileHTTPLogger(log_path)  # Creates dirs on init
+            assert log_path.exists()
+            assert log_path.parent.exists()
+
+    def test_file_logger_logs_request(self) -> None:
+        """Test logging an HTTP request."""
+        with TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "http.log"
+            logger = FileHTTPLogger(log_path)
+
+            logger.log_request(
+                method="POST",
+                url="https://api.example.com/v1/chat",
+                headers={"Authorization": "Bearer sk-1234567890abcdef", "Content-Type": "application/json"},
+                body={"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]},
+                session_id="test-session-123",
+            )
+
+            content = log_path.read_text()
+            assert "[test-session-123]" in content
+            assert ">>> REQUEST" in content
+            assert "POST" in content
+            assert "https://api.example.com/v1/chat" in content
+            # Check that Authorization header is sanitized (full key not in output)
+            assert "sk-1234567890abcdef" not in content
+            # Sanitized format: first 10 chars + "..." + last 4 chars
+            assert "Bearer sk-..." in content
+
+    def test_file_logger_logs_response(self) -> None:
+        """Test logging an HTTP response."""
+        with TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "http.log"
+            logger = FileHTTPLogger(log_path)
+
+            logger.log_response(
+                url="https://api.example.com/v1/chat",
+                status=200,
+                body={"choices": [{"message": {"content": "Hello!"}}]},
+                session_id="test-session-123",
+            )
+
+            content = log_path.read_text()
+            assert "[test-session-123]" in content
+            assert "<<< RESPONSE" in content
+            assert "200" in content
+            assert "Hello!" in content
+
+    def test_file_logger_logs_sse_chunk(self) -> None:
+        """Test logging an SSE chunk."""
+        with TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "http.log"
+            logger = FileHTTPLogger(log_path)
+
+            logger.log_sse_chunk(
+                url="https://api.example.com/v1/chat",
+                data='{"choices": [{"delta": {"content": "Hi"}}]}',
+                session_id="test-session-123",
+            )
+
+            content = log_path.read_text()
+            assert "[test-session-123]" in content
+            assert "<<< SSE" in content
+            assert "Hi" in content
+
+    def test_file_logger_no_session_id(self) -> None:
+        """Test logging without a session ID uses 'no-session'."""
+        with TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "http.log"
+            logger = FileHTTPLogger(log_path)
+
+            logger.log_request(
+                method="GET",
+                url="https://api.example.com/models",
+                headers={},
+                body=None,
+            )
+
+            content = log_path.read_text()
+            assert "[no-session]" in content
