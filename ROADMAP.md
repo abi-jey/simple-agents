@@ -57,6 +57,32 @@ nagents currently supports:
 - [ ] Custom skill development API
 - [ ] Skill composition and chaining
 
+#### Multi-Agent Support
+- [ ] Agent-to-agent communication
+- [ ] Agent orchestration and coordination
+- [ ] Hierarchical agent structures
+- [ ] Shared context and memory between agents
+
+#### A2A Protocol Support
+- [ ] Google A2A (Agent-to-Agent) protocol implementation
+- [ ] Agent discovery and registration
+- [ ] Standardized agent communication
+- [ ] Interoperability with other A2A-compatible frameworks
+
+### Realtime & Live APIs
+
+#### OpenAI Realtime API
+- [ ] WebSocket-based realtime communication
+- [ ] Voice input/output support
+- [ ] Low-latency streaming responses
+- [ ] Realtime function calling
+
+#### Google Gemini Live API
+- [ ] Bidirectional streaming support
+- [ ] Live audio/video input processing
+- [ ] Real-time multimodal interactions
+- [ ] Live API-specific features
+
 ### Documentation & Examples
 
 - [ ] Comprehensive provider-specific examples
@@ -78,4 +104,6 @@ We welcome contributions! If you'd like to help implement any of these features,
 - **0.2.x** - Multi-provider support (Gemini, Anthropic, Vertex)
 - **0.3.x** - Advanced features (Skills, LiteLLM)
 - **0.4.x** - Observability (Langfuse, OpenTelemetry)
+- **0.5.x** - Multi-agent support (A2A protocol, agent orchestration)
+- **0.6.x** - Realtime APIs (OpenAI Realtime, Gemini Live)
 - **1.0.0** - Stable release with full feature set
