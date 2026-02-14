@@ -348,32 +348,47 @@ class Provider:
     ) -> AsyncIterator[Event]:
         """Generate using Azure OpenAI Service API.
 
-        Azure OpenAI uses a different URL structure and authentication:
+        Two variants are supported:
+
+        AZURE_OPENAI_COMPATIBLE (deployment-based):
         - URL: https://{resource}.cognitiveservices.azure.com/openai/deployments/{deployment}/chat/completions
-        - base_url should include /openai suffix
-        - Auth: api-key header instead of Authorization Bearer
+        - Auth: api-key header
         - Requires api-version query parameter
+
+        AZURE_OPENAI_COMPATIBLE_V1 (OpenAI-compatible):
+        - URL: https://{resource}.openai.azure.com/openai/v1/chat/completions
+        - Auth: Authorization Bearer token
+        - Model specified in request body (like standard OpenAI)
         """
         # Azure URL format: {base_url}/deployments/{deployment}/chat/completions?api-version={version}
         # Note: base_url should include /openai suffix (e.g., https://{resource}.cognitiveservices.azure.com/openai)
         if self.provider_type == ProviderType.AZURE_OPENAI_COMPATIBLE:
             url = f"{self.base_url}/deployments/{self.model}/chat/completions?api-version={self.api_version}"
+            # Azure uses api-key header instead of Authorization Bearer
+            headers = {
+                "api-key": self.api_key,
+                "Content-Type": "application/json",
+            }
         elif self.provider_type == ProviderType.AZURE_OPENAI_COMPATIBLE_V1:
-            # V1 Azure OpenAI format (without api-version in query)
-            url = f"{self.base_url}/v1/deployments/{self.model}/chat/completions"
+            # V1 Azure OpenAI format - standard OpenAI-compatible endpoint
+            # URL: https://{resource}.openai.azure.com/openai/v1/chat/completions
+            # Uses Bearer token auth and model in body (like standard OpenAI)
+            url = f"{self.base_url}/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            }
         else:
             raise ValueError(f"Unexpected provider type for Azure generation: {self.provider_type}")
-        # Azure uses api-key header instead of Authorization Bearer
-        headers = {
-            "api-key": self.api_key,
-            "Content-Type": "application/json",
-        }
 
         body: dict[str, Any] = {
-            # Note: Azure doesn't need model in body since it's in the URL
             "messages": openai_adapter.format_messages(messages),
             "stream": stream,
         }
+
+        # V1 API requires model in body (like standard OpenAI)
+        if self.provider_type == ProviderType.AZURE_OPENAI_COMPATIBLE_V1:
+            body["model"] = self.model
 
         # Request usage data in streaming responses
         if stream:

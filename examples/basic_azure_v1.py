@@ -1,22 +1,24 @@
 """
-Example demonstrating the nagents module with Azure AI Services.
+Example demonstrating the nagents module with Azure OpenAI V1 API.
 
 This example shows how to use the Agent class with Azure-deployed models
-via the OpenAI-compatible API endpoint.
+via the OpenAI-compatible V1 API endpoint.
 
-Azure AI Services Setup:
-------------------------
-1. Create an Azure AI Services resource in Azure Portal
+Azure OpenAI V1 Setup:
+----------------------
+1. Create an Azure OpenAI resource in Azure Portal
 2. Deploy a model (e.g., GPT-4o, Kimi-K2.5, etc.)
 3. Get your endpoint URL and API key from the Azure Portal
 4. Set the following environment variables in your .env file:
 
-   AZURE_DEPLOYED_MODEL_ENDPOINT=https://your-resource.services.ai.azure.com/api/projects/yourProject
-   AZURE_DEPLOYED_MODEL_KEY=your-api-key
-   AZURE_DEPLOYED_MODEL_NAME=your-deployed-model-name
+   AZURE_V1_ENDPOINT=https://your-resource.openai.azure.com/openai
+   AZURE_V1_API_KEY=your-api-key
+   AZURE_V1_MODEL=your-deployed-model-name
 
-Note: Azure AI Services uses OpenAI-compatible API, so we use ProviderType.OPENAI_COMPATIBLE
-with a custom base_url pointing to your Azure endpoint.
+The V1 API uses:
+- URL: https://{resource}.openai.azure.com/openai/v1/chat/completions
+- Auth: Authorization Bearer token
+- Model specified in request body (like standard OpenAI)
 """
 
 import asyncio
@@ -65,39 +67,36 @@ def get_time(tz: str = "UTC") -> str:
 
 def get_azure_provider() -> Provider:
     """
-    Create a Provider configured for Azure AI Services.
+    Create a Provider configured for Azure OpenAI V1 API.
 
-    Azure AI Services endpoints are OpenAI-compatible, so we use
-    ProviderType.OPENAI_COMPATIBLE with the Azure endpoint as base_url.
-
-    The endpoint URL format for Azure AI Services is typically:
-    https://<resource>.services.ai.azure.com/api/projects/<project>/openai
+    The V1 API is OpenAI-compatible and uses:
+    - URL: https://{resource}.openai.azure.com/openai/v1/chat/completions
+    - Auth: Authorization Bearer token
+    - Model in request body
 
     Returns:
-        Provider configured for Azure AI Services
+        Provider configured for Azure OpenAI V1 API
 
     Raises:
         ValueError: If required environment variables are not set
     """
     # Get Azure configuration from environment
-    # Note: Variable names may seem counterintuitive based on your Azure setup
-    # Adjust as needed for your specific configuration
-    endpoint = os.getenv("AZURE_DEPLOYED_MODEL_ENDPOINT")
-    api_key = os.getenv("AZURE_DEPLOYED_MODEL_NAME")  # This contains the API key
-    model_name = os.getenv("AZURE_DEPLOYED_MODEL_KEY")  # This contains the model name
+    endpoint = os.getenv("AZURE_V1_ENDPOINT")
+    api_key = os.getenv("AZURE_V1_API_KEY")
+    model_name = os.getenv("AZURE_V1_MODEL")
 
     if not endpoint:
-        raise ValueError("AZURE_DEPLOYED_MODEL_ENDPOINT not set. Please set it in your .env file.")
+        raise ValueError("AZURE_V1_ENDPOINT not set. Please set it in your .env file.")
     if not api_key:
-        raise ValueError("AZURE_DEPLOYED_MODEL_NAME (API key) not set. Please set it in your .env file.")
+        raise ValueError("AZURE_V1_API_KEY not set. Please set it in your .env file.")
     if not model_name:
-        raise ValueError("AZURE_DEPLOYED_MODEL_KEY (model name) not set. Please set it in your .env file.")
+        raise ValueError("AZURE_V1_MODEL not set. Please set it in your .env file.")
 
-    # Construct the OpenAI-compatible base URL for Azure AI Services
-    # Azure AI Services uses: {endpoint}/openai for the OpenAI-compatible API
-    base_url = f"{endpoint.rstrip('/')}/openai"
+    # base_url should be: https://{resource}.openai.azure.com/openai
+    # The provider will append /v1/chat/completions
+    base_url = endpoint.rstrip("/")
 
-    console.print(f"[dim]Azure endpoint: {endpoint}[/dim]")
+    console.print(f"[dim]Azure V1 endpoint: {base_url}[/dim]")
     console.print(f"[dim]Model: {model_name}[/dim]")
 
     return Provider(
@@ -109,22 +108,20 @@ def get_azure_provider() -> Provider:
 
 
 async def main() -> None:
-    """Main example demonstrating Azure AI Services integration."""
-    console.print(Panel.fit("[bold blue]nagents Azure Example[/bold blue]"))
+    """Main example demonstrating Azure OpenAI V1 integration."""
+    console.print(Panel.fit("[bold blue]nagents Azure V1 Example[/bold blue]"))
 
     try:
         provider = get_azure_provider()
     except ValueError as e:
         console.print(f"[bold red]Configuration Error:[/bold red] {e}")
         console.print("\n[yellow]Please ensure your .env file contains:[/yellow]")
-        console.print(
-            "  AZURE_DEPLOYED_MODEL_ENDPOINT=https://your-resource.services.ai.azure.com/api/projects/yourProject"
-        )
-        console.print("  AZURE_DEPLOYED_MODEL_NAME=your-api-key")
-        console.print("  AZURE_DEPLOYED_MODEL_KEY=your-model-name")
+        console.print("  AZURE_V1_ENDPOINT=https://your-resource.openai.azure.com/openai")
+        console.print("  AZURE_V1_API_KEY=your-api-key")
+        console.print("  AZURE_V1_MODEL=your-model-name")
         return
 
-    console.print("[dim]Using Azure AI Services provider[/dim]")
+    console.print("[dim]Using Azure OpenAI V1 provider[/dim]")
 
     # Create session manager
     session_manager = SessionManager(Path("sessions_azure.db"))
@@ -228,7 +225,7 @@ async def main() -> None:
     finally:
         # Always close to release resources
         await agent.close()
-    console.print("\n[dim]Azure example complete.[/dim]")
+    console.print("\n[dim]Azure V1 example complete.[/dim]")
 
 
 if __name__ == "__main__":
