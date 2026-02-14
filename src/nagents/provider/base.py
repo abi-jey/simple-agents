@@ -269,10 +269,10 @@ class Provider:
             if self.provider_type == ProviderType.OPENAI_COMPATIBLE:
                 async for event in self._generate_openai(messages, tools, config, stream):
                     yield event
-            elif self.provider_type == ProviderType.AZURE_OPENAI_COMPATIBLE:
-                async for event in self._generate_azure_openai(messages, tools, config, stream):
-                    yield event
-            elif self.provider_type == ProviderType.AZURE_OPENAI_COMPATIBLE_V1:
+            elif (
+                self.provider_type == ProviderType.AZURE_OPENAI_COMPATIBLE
+                or self.provider_type == ProviderType.AZURE_OPENAI_COMPATIBLE_V1
+            ):
                 async for event in self._generate_azure_openai(messages, tools, config, stream):
                     yield event
             elif self.provider_type == ProviderType.ANTHROPIC:
