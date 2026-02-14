@@ -43,10 +43,10 @@ console = Console()
 
 # Configuration - edit these values for your Azure OpenAI resource
 AZURE_RESOURCE_NAME = "agent-test-abbas"  # Your Azure OpenAI resource name
-AZURE_API_KEY = os.getenv("AZURE_DEPLOYED_MODEL_NAME")  # This env var contains the API key (naming is reversed)
+AZURE_API_KEY = os.getenv("AZURE_DEPLOYED_MODEL_KEY")  # API key
 # NOTE: You need a Global-Batch deployment type for batch processing
 # Check your deployments in Azure OpenAI Studio and use the name of a Global-Batch deployment
-BATCH_DEPLOYMENT_NAME = os.getenv("AZURE_DEPLOYED_MODEL_KEY", "Kimi-K2.5")  # Model name from env
+BATCH_DEPLOYMENT_NAME = os.getenv("AZURE_DEPLOYED_MODEL_NAME", "Kimi-K2.5")  # Model/deployment name
 
 
 def get_azure_batch_provider() -> Provider:

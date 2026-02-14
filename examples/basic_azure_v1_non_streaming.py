@@ -50,15 +50,15 @@ def get_time(tz: str = "UTC") -> str:
 def get_azure_provider() -> Provider:
     """Create a Provider configured for Azure OpenAI V1 API."""
     endpoint = os.getenv("AZURE_DEPLOYED_MODEL_ENDPOINT")
-    api_key = os.getenv("AZURE_DEPLOYED_MODEL_NAME")
-    model_name = os.getenv("AZURE_DEPLOYED_MODEL_KEY")
+    api_key = os.getenv("AZURE_DEPLOYED_MODEL_KEY")  # API key
+    model_name = os.getenv("AZURE_DEPLOYED_MODEL_NAME")  # Model/deployment name
 
     if not endpoint:
         raise ValueError("AZURE_DEPLOYED_MODEL_ENDPOINT not set. Please set it in your .env file.")
     if not api_key:
-        raise ValueError("AZURE_DEPLOYED_MODEL_NAME (API key) not set. Please set it in your .env file.")
+        raise ValueError("AZURE_DEPLOYED_MODEL_KEY (API key) not set. Please set it in your .env file.")
     if not model_name:
-        raise ValueError("AZURE_DEPLOYED_MODEL_KEY (model name) not set. Please set it in your .env file.")
+        raise ValueError("AZURE_DEPLOYED_MODEL_NAME (model name) not set. Please set it in your .env file.")
 
     base_url = f"{endpoint.rstrip('/')}/openai"
 
@@ -82,9 +82,9 @@ async def main() -> None:
     except ValueError as e:
         console.print(f"[bold red]Configuration Error:[/bold red] {e}")
         console.print("\n[yellow]Please ensure your .env file contains:[/yellow]")
-        console.print("  AZURE_DEPLOYED_MODEL_ENDPOINT=https://your-resource.openai.azure.com")
-        console.print("  AZURE_DEPLOYED_MODEL_NAME=your-api-key")
-        console.print("  AZURE_DEPLOYED_MODEL_KEY=your-model-name")
+        console.print("  AZURE_DEPLOYED_MODEL_ENDPOINT=https://your-resource.cognitiveservices.azure.com")
+        console.print("  AZURE_DEPLOYED_MODEL_KEY=your-api-key")
+        console.print("  AZURE_DEPLOYED_MODEL_NAME=your-deployment-name")
         return
 
     console.print("[dim]Using Azure OpenAI V1 provider (non-streaming)[/dim]")

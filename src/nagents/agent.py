@@ -24,6 +24,7 @@ from .events import ToolCallEvent
 from .events import Usage
 from .exceptions import ToolHallucinationError
 from .http import FileHTTPLogger
+from .http import HTTPError
 from .provider import Provider
 from .provider import ProviderType
 from .session import SessionManager
@@ -539,11 +540,15 @@ class Agent:
                 generation_config=config,
             )
             logger.info(f"Batch job created: {job.id}, status: {job.status}")
+        except HTTPError as e:
+            error_msg = f"Failed to create batch: {e}"
+            if e.body:
+                error_msg += f"\nResponse: {e.body}"
+            logger.error(error_msg)
+            yield ErrorEvent(message=error_msg)
+            return
         except Exception as e:
             error_msg = f"Failed to create batch: {e}"
-            # Include response body if available
-            if hasattr(e, "body") and e.body:
-                error_msg += f"\nResponse: {e.body}"
             logger.error(error_msg)
             yield ErrorEvent(message=error_msg)
             return

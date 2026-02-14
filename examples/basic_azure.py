@@ -80,18 +80,16 @@ def get_azure_provider() -> Provider:
         ValueError: If required environment variables are not set
     """
     # Get Azure configuration from environment
-    # Note: Variable names may seem counterintuitive based on your Azure setup
-    # Adjust as needed for your specific configuration
     endpoint = os.getenv("AZURE_DEPLOYED_MODEL_ENDPOINT")
-    api_key = os.getenv("AZURE_DEPLOYED_MODEL_NAME")  # This contains the API key
-    model_name = os.getenv("AZURE_DEPLOYED_MODEL_KEY")  # This contains the model name
+    api_key = os.getenv("AZURE_DEPLOYED_MODEL_KEY")  # API key
+    model_name = os.getenv("AZURE_DEPLOYED_MODEL_NAME")  # Model/deployment name
 
     if not endpoint:
         raise ValueError("AZURE_DEPLOYED_MODEL_ENDPOINT not set. Please set it in your .env file.")
     if not api_key:
-        raise ValueError("AZURE_DEPLOYED_MODEL_NAME (API key) not set. Please set it in your .env file.")
+        raise ValueError("AZURE_DEPLOYED_MODEL_KEY (API key) not set. Please set it in your .env file.")
     if not model_name:
-        raise ValueError("AZURE_DEPLOYED_MODEL_KEY (model name) not set. Please set it in your .env file.")
+        raise ValueError("AZURE_DEPLOYED_MODEL_NAME (model name) not set. Please set it in your .env file.")
 
     # Construct the OpenAI-compatible base URL for Azure AI Services
     # Azure AI Services uses: {endpoint}/openai for the OpenAI-compatible API
@@ -121,8 +119,8 @@ async def main() -> None:
         console.print(
             "  AZURE_DEPLOYED_MODEL_ENDPOINT=https://your-resource.services.ai.azure.com/api/projects/yourProject"
         )
-        console.print("  AZURE_DEPLOYED_MODEL_NAME=your-api-key")
-        console.print("  AZURE_DEPLOYED_MODEL_KEY=your-model-name")
+        console.print("  AZURE_DEPLOYED_MODEL_KEY=your-api-key")
+        console.print("  AZURE_DEPLOYED_MODEL_NAME=your-deployment-name")
         return
 
     console.print("[dim]Using Azure AI Services provider[/dim]")
