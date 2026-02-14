@@ -4,7 +4,14 @@ Example demonstrating batch processing with Azure OpenAI V1 API.
 Azure OpenAI Batch API offers 50% cost discount compared to real-time API.
 Batch requests are processed asynchronously with 24-hour target turnaround.
 
-IMPORTANT: You need a Global-Batch deployment type for batch processing.
+REQUIREMENTS:
+1. You must create a Global-Batch deployment type in Azure OpenAI Studio
+   - Standard deployments (GlobalStandard) do NOT support batch processing
+   - Go to Azure OpenAI Studio > Deployments > Create new > Select "Global-Batch" type
+2. The deployment name must be used as the model name
+3. Models available for Global-Batch: gpt-4o, gpt-4o-mini, gpt-4.1, gpt-4.1-mini, gpt-4.1-nano, o3-mini, o4-mini, gpt-5, gpt-5.1
+
+Error "invalid_deployment_type" means you need to create a Global-Batch deployment.
 """
 
 import asyncio
@@ -28,43 +35,35 @@ from nagents import Provider
 from nagents import ProviderType
 from nagents import SessionManager
 from nagents import TextDoneEvent
-from nagents import ToolCallEvent
-from nagents import ToolResultEvent
 
 load_dotenv()
 
 logger = getLogger(__name__)
 console = Console()
 
-
-def get_time(tz: str = "UTC") -> str:
-    """Get the current time in a specific timezone."""
-    now = datetime.now(UTC)
-    return f"Current time in {tz}: {now.strftime('%Y-%m-%d %H:%M:%S')}"
-
-
-def order_coffee(quantity: int, store: str) -> str:
-    """Simulate ordering coffee."""
-    return f"Ordered {quantity} coffee(s) from {store}."
+# Configuration - edit these values for your Azure OpenAI resource
+AZURE_RESOURCE_NAME = "agent-test-abbas"  # Your Azure OpenAI resource name
+AZURE_API_KEY = os.getenv("AZURE_DEPLOYED_MODEL_NAME")  # This env var contains the API key (naming is reversed)
+# NOTE: You need a Global-Batch deployment type for batch processing
+# Check your deployments in Azure OpenAI Studio and use the name of a Global-Batch deployment
+BATCH_DEPLOYMENT_NAME = os.getenv("AZURE_DEPLOYED_MODEL_KEY", "Kimi-K2.5")  # Model name from env
 
 
-def get_azure_v1_provider() -> Provider:
+def get_azure_batch_provider() -> Provider:
     """Create a Provider configured for Azure OpenAI V1 API with batch support."""
-    endpoint = os.getenv("AZURE_DEPLOYED_MODEL_ENDPOINT")
-    api_key = os.getenv("AZURE_DEPLOYED_MODEL_NAME")
-    model_name = os.getenv("AZURE_DEPLOYED_MODEL_KEY")
-
-    if not endpoint:
-        raise ValueError("AZURE_DEPLOYED_MODEL_ENDPOINT not set. Please set it in your .env file.")
+    api_key = AZURE_API_KEY
     if not api_key:
-        raise ValueError("AZURE_DEPLOYED_MODEL_NAME (API key) not set. Please set it in your .env file.")
-    if not model_name:
-        raise ValueError("AZURE_DEPLOYED_MODEL_KEY (model name) not set. Please set it in your .env file.")
+        raise ValueError("AZURE_DEPLOYED_MODEL_NAME (API key) not set in environment.")
 
-    base_url = f"{endpoint.rstrip('/')}/openai"
+    resource_name = AZURE_RESOURCE_NAME
+    model_name = BATCH_DEPLOYMENT_NAME
+
+    # Azure OpenAI V1 API base URL format
+    # https://{resource-name}.openai.azure.com/openai/v1/
+    base_url = f"https://{resource_name}.openai.azure.com/openai"
 
     console.print(f"[dim]Azure V1 endpoint: {base_url}[/dim]")
-    console.print(f"[dim]Model: {model_name}[/dim]")
+    console.print(f"[dim]Model (deployment): {model_name}[/dim]")
 
     return Provider(
         provider_type=ProviderType.AZURE_OPENAI_COMPATIBLE_V1,
@@ -80,7 +79,7 @@ async def main() -> None:
     console.print("[dim]Using Azure OpenAI V1 provider with batch mode[/dim]\n")
 
     try:
-        provider = get_azure_v1_provider()
+        provider = get_azure_batch_provider()
     except ValueError as e:
         console.print(f"[bold red]Configuration Error:[/bold red] {e}")
         return
@@ -92,8 +91,8 @@ async def main() -> None:
     agent = Agent(
         provider=provider,
         session_manager=session_manager,
-        tools=[get_time, order_coffee],
-        system_prompt="You are a helpful assistant with access to coffee ordering and time tools.",
+        tools=[],  # No tools for simple batch example
+        system_prompt="You are a helpful assistant.",
         streaming=False,
         batch=True,
         batch_poll_interval=10.0,
@@ -106,18 +105,12 @@ async def main() -> None:
         console.print(f"[blue]HTTP logging to: {log_file}[/blue]")
         console.print("[yellow]Batch mode enabled - 50% cost discount![/yellow]")
 
-        query = "What time is it? Can you order 2 coffees from the local shop?"
+        query = "What is the capital of France? Give a brief answer."
         console.print(Panel(f"[bold]User:[/bold] {query}", border_style="green"))
         console.print()
 
         async for event in agent.run(user_message=query, session_id=session_id):
-            if isinstance(event, ToolCallEvent):
-                console.print(f"[yellow]Tool Call:[/yellow] {event.name}({event.arguments})")
-            elif isinstance(event, ToolResultEvent):
-                result_str = str(event.result) if event.result else "None"
-                error_str = f" [red]Error: {event.error}[/red]" if event.error else ""
-                console.print(f"[green]Tool Result:[/green] {result_str}{error_str} ({event.duration_ms:.1f}ms)")
-            elif isinstance(event, TextDoneEvent):
+            if isinstance(event, TextDoneEvent):
                 console.print(
                     Panel(
                         event.text,
@@ -144,10 +137,6 @@ async def main() -> None:
                     f"total={event.usage.total_tokens}",
                     style="dim",
                 )
-                if event.usage.cached_tokens > 0:
-                    usage_text.append(f", cached={event.usage.cached_tokens}", style="green")
-                if event.usage.reasoning_tokens > 0:
-                    usage_text.append(f", reasoning={event.usage.reasoning_tokens}", style="magenta")
                 console.print(usage_text)
                 console.print(f"[dim]Finish reason: {event.finish_reason.value}[/dim]")
                 console.print("[green]Cost savings: 50% compared to real-time API[/green]")

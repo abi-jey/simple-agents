@@ -540,8 +540,12 @@ class Agent:
             )
             logger.info(f"Batch job created: {job.id}, status: {job.status}")
         except Exception as e:
-            logger.error(f"Failed to create batch: {e}")
-            yield ErrorEvent(message=f"Failed to create batch: {e}")
+            error_msg = f"Failed to create batch: {e}"
+            # Include response body if available
+            if hasattr(e, "body") and e.body:
+                error_msg += f"\nResponse: {e.body}"
+            logger.error(error_msg)
+            yield ErrorEvent(message=error_msg)
             return
 
         # Wait for completion
