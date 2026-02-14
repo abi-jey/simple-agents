@@ -16,6 +16,7 @@ from typing import Any
 from ..adapters import openai as openai_adapter
 from ..events import ErrorEvent
 from ..events import Event
+from ..events import FinishReason
 from ..events import ReasoningChunkEvent
 from ..events import TextChunkEvent
 from ..events import TextDoneEvent
@@ -427,6 +428,8 @@ class Provider:
         full_reasoning = ""
         tool_accumulator = openai_adapter.StreamingToolCallAccumulator()
         latest_usage = Usage()
+        finish_reason = FinishReason.UNKNOWN
+        extra: dict[str, Any] = {}
 
         async for data in self._http.post_stream(url, body, headers):
             if data == "[DONE]":
@@ -437,13 +440,26 @@ class Provider:
             except json.JSONDecodeError:
                 continue
 
+            # Capture extra metadata
+            if "id" in chunk:
+                extra["id"] = chunk["id"]
+            if "model" in chunk:
+                extra["model"] = chunk["model"]
+            if "created" in chunk:
+                extra["created"] = chunk["created"]
+
             # Handle usage (OpenAI sends this in a separate final chunk with empty choices)
             usage = chunk.get("usage")
             if usage:
+                prompt_details = usage.get("prompt_tokens_details") or {}
+                completion_details = usage.get("completion_tokens_details") or {}
                 latest_usage = Usage(
                     prompt_tokens=usage.get("prompt_tokens", 0),
                     completion_tokens=usage.get("completion_tokens", 0),
                     total_tokens=usage.get("total_tokens", 0),
+                    cached_tokens=prompt_details.get("cached_tokens", 0),
+                    audio_tokens=prompt_details.get("audio_tokens", 0) + completion_details.get("audio_tokens", 0),
+                    reasoning_tokens=completion_details.get("reasoning_tokens", 0),
                 )
 
             choices = chunk.get("choices") or []
@@ -452,7 +468,18 @@ class Provider:
 
             choice = choices[0]
             delta = choice.get("delta") or {}
-            _ = choice.get("finish_reason")  # Reserved for future use
+
+            # Parse finish_reason
+            fr = choice.get("finish_reason")
+            if fr:
+                if fr == "stop":
+                    finish_reason = FinishReason.STOP
+                elif fr == "tool_calls":
+                    finish_reason = FinishReason.TOOL_CALLS
+                elif fr == "length":
+                    finish_reason = FinishReason.LENGTH
+                elif fr == "content_filter":
+                    finish_reason = FinishReason.CONTENT_FILTER
 
             # Handle reasoning content (e.g., from Kimi, DeepSeek, o1 models)
             reasoning = delta.get("reasoning_content")
@@ -464,7 +491,7 @@ class Provider:
             content = delta.get("content")
             if content:
                 full_text += content
-                yield TextChunkEvent(chunk=content, usage=latest_usage)
+                yield TextChunkEvent(chunk=content, usage=latest_usage, extra=extra)
 
             # Handle tool calls
             if "tool_calls" in delta:
@@ -479,9 +506,11 @@ class Provider:
                     name=tc.name,
                     arguments=tc.arguments,
                     usage=latest_usage,
+                    finish_reason=FinishReason.TOOL_CALLS,
+                    extra=extra,
                 )
         elif full_text:
-            yield TextDoneEvent(text=full_text, usage=latest_usage)
+            yield TextDoneEvent(text=full_text, usage=latest_usage, finish_reason=finish_reason, extra=extra)
 
     async def _non_stream_openai(
         self,
@@ -500,20 +529,46 @@ class Provider:
         choice = choices[0]
         message = choice.get("message") or {}
 
-        # Handle usage
+        # Parse finish_reason
+        finish_reason = FinishReason.UNKNOWN
+        fr = choice.get("finish_reason")
+        if fr == "stop":
+            finish_reason = FinishReason.STOP
+        elif fr == "tool_calls":
+            finish_reason = FinishReason.TOOL_CALLS
+        elif fr == "length":
+            finish_reason = FinishReason.LENGTH
+        elif fr == "content_filter":
+            finish_reason = FinishReason.CONTENT_FILTER
+
+        # Parse extra metadata
+        extra: dict[str, Any] = {}
+        if "id" in response:
+            extra["id"] = response["id"]
+        if "model" in response:
+            extra["model"] = response["model"]
+        if "created" in response:
+            extra["created"] = response["created"]
+
+        # Handle usage with detailed breakdown
         latest_usage = Usage()
         usage = response.get("usage")
         if usage:
+            prompt_details = usage.get("prompt_tokens_details") or {}
+            completion_details = usage.get("completion_tokens_details") or {}
             latest_usage = Usage(
                 prompt_tokens=usage.get("prompt_tokens", 0),
                 completion_tokens=usage.get("completion_tokens", 0),
                 total_tokens=usage.get("total_tokens", 0),
+                cached_tokens=prompt_details.get("cached_tokens", 0),
+                audio_tokens=prompt_details.get("audio_tokens", 0) + completion_details.get("audio_tokens", 0),
+                reasoning_tokens=completion_details.get("reasoning_tokens", 0),
             )
 
         # Handle reasoning content (from chain-of-thought models)
         reasoning = message.get("reasoning_content")
         if reasoning:
-            yield ReasoningChunkEvent(chunk=reasoning, usage=latest_usage)
+            yield ReasoningChunkEvent(chunk=reasoning, usage=latest_usage, extra=extra)
 
         # Handle tool calls
         tool_calls = openai_adapter.parse_tool_calls(choice)
@@ -524,12 +579,14 @@ class Provider:
                     name=tc.name,
                     arguments=tc.arguments,
                     usage=latest_usage,
+                    finish_reason=FinishReason.TOOL_CALLS,
+                    extra=extra,
                 )
         else:
             # Handle text response
             content = message.get("content", "")
             if content:
-                yield TextDoneEvent(text=content, usage=latest_usage)
+                yield TextDoneEvent(text=content, usage=latest_usage, finish_reason=finish_reason, extra=extra)
 
     async def _generate_gemini(
         self,
@@ -571,6 +628,8 @@ class Provider:
         full_text = ""
         all_tool_calls: list[ToolCall] = []
         latest_usage = Usage()
+        finish_reason = FinishReason.UNKNOWN
+        extra: dict[str, Any] = {}
 
         async for data in self._http.post_stream(url, body, headers):
             try:
@@ -589,7 +648,7 @@ class Provider:
 
             if text:
                 full_text += text
-                yield TextChunkEvent(chunk=text, usage=latest_usage)
+                yield TextChunkEvent(chunk=text, usage=latest_usage, extra=extra)
 
             if tool_calls:
                 all_tool_calls.extend(tool_calls)
@@ -602,9 +661,11 @@ class Provider:
                     name=tc.name,
                     arguments=tc.arguments,
                     usage=latest_usage,
+                    finish_reason=FinishReason.TOOL_CALLS,
+                    extra=extra,
                 )
         elif full_text:
-            yield TextDoneEvent(text=full_text, usage=latest_usage)
+            yield TextDoneEvent(text=full_text, usage=latest_usage, finish_reason=finish_reason, extra=extra)
 
     async def _non_stream_gemini(
         self,
@@ -627,6 +688,22 @@ class Provider:
                 total_tokens=usage.get("totalTokenCount", 0),
             )
 
+        # Parse finish_reason from Gemini response
+        finish_reason = FinishReason.UNKNOWN
+        candidates = response.get("candidates", [])
+        if candidates:
+            finish_reason_str = candidates[0].get("finishReason", "")
+            if finish_reason_str == "STOP":
+                finish_reason = FinishReason.STOP
+            elif finish_reason_str == "MAX_TOKENS":
+                finish_reason = FinishReason.LENGTH
+            elif finish_reason_str == "SAFETY":
+                finish_reason = FinishReason.CONTENT_FILTER
+
+        extra: dict[str, Any] = {}
+        if "model" in response:
+            extra["model"] = response["model"]
+
         if tool_calls:
             for tc in tool_calls:
                 yield ToolCallEvent(
@@ -634,9 +711,11 @@ class Provider:
                     name=tc.name,
                     arguments=tc.arguments,
                     usage=latest_usage,
+                    finish_reason=FinishReason.TOOL_CALLS,
+                    extra=extra,
                 )
         elif text:
-            yield TextDoneEvent(text=text, usage=latest_usage)
+            yield TextDoneEvent(text=text, usage=latest_usage, finish_reason=finish_reason, extra=extra)
 
     async def _generate_anthropic(
         self,
@@ -761,6 +840,9 @@ class Provider:
                         total_tokens=usage.get("input_tokens", 0),
                     )
 
+        # Parse finish_reason from message_delta
+        finish_reason = FinishReason.UNKNOWN
+
         # Emit accumulated tool calls
         tool_calls = tool_accumulator.get_complete_tool_calls()
         if tool_calls:
@@ -770,9 +852,10 @@ class Provider:
                     name=tc.name,
                     arguments=tc.arguments,
                     usage=latest_usage,
+                    finish_reason=FinishReason.TOOL_CALLS,
                 )
         elif full_text:
-            yield TextDoneEvent(text=full_text, usage=latest_usage)
+            yield TextDoneEvent(text=full_text, usage=latest_usage, finish_reason=finish_reason)
 
     async def _non_stream_anthropic(
         self,
@@ -785,6 +868,23 @@ class Provider:
 
         response = await self._http.post_json(url, body, headers)
         text, tool_calls, usage = anthropic_adapter.parse_response(response)
+
+        # Parse finish_reason
+        finish_reason = FinishReason.UNKNOWN
+        stop_reason = response.get("stop_reason")
+        if stop_reason == "end_turn":
+            finish_reason = FinishReason.STOP
+        elif stop_reason == "tool_use":
+            finish_reason = FinishReason.TOOL_CALLS
+        elif stop_reason == "max_tokens":
+            finish_reason = FinishReason.LENGTH
+
+        # Parse extra metadata
+        extra: dict[str, Any] = {}
+        if "id" in response:
+            extra["id"] = response["id"]
+        if "model" in response:
+            extra["model"] = response["model"]
 
         # Parse usage
         latest_usage = Usage()
@@ -802,9 +902,11 @@ class Provider:
                     name=tc.name,
                     arguments=tc.arguments,
                     usage=latest_usage,
+                    finish_reason=FinishReason.TOOL_CALLS,
+                    extra=extra,
                 )
         elif text:
-            yield TextDoneEvent(text=text, usage=latest_usage)
+            yield TextDoneEvent(text=text, usage=latest_usage, finish_reason=finish_reason, extra=extra)
 
     async def close(self) -> None:
         """Close the provider and release resources."""

@@ -33,6 +33,17 @@ class EventType(Enum):
     DONE = "done"  # Generation complete
 
 
+class FinishReason(Enum):
+    """Reason why the model stopped generating."""
+
+    STOP = "stop"  # Natural stop or stop sequence
+    TOOL_CALLS = "tool_calls"  # Model called tools
+    LENGTH = "length"  # Max tokens reached
+    CONTENT_FILTER = "content_filter"  # Content policy violation (Azure)
+    NULL = "null"  # Still generating (streaming)
+    UNKNOWN = "unknown"  # Fallback/unknown reason
+
+
 @dataclass
 class TokenUsage:
     """Token counts for a generation or session."""
@@ -51,12 +62,18 @@ class Usage:
         prompt_tokens: Input tokens for current generation
         completion_tokens: Output tokens for current generation
         total_tokens: Total tokens for current generation
+        cached_tokens: Cached prompt tokens (OpenAI)
+        audio_tokens: Audio input/output tokens
+        reasoning_tokens: Tokens used for reasoning/thinking (chain-of-thought models)
         session: Cumulative token usage across the entire session/run
     """
 
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    cached_tokens: int = 0
+    audio_tokens: int = 0
+    reasoning_tokens: int = 0
     session: TokenUsage | None = None
 
     def has_usage(self) -> bool:
@@ -71,6 +88,7 @@ class Event:
     type: EventType
     timestamp: datetime = field(default_factory=datetime.now)
     usage: Usage = field(default_factory=Usage)
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -95,6 +113,7 @@ class TextDoneEvent(Event):
 
     type: EventType = field(default=EventType.TEXT_DONE)
     text: str = ""
+    finish_reason: FinishReason = FinishReason.STOP
 
 
 @dataclass
@@ -105,6 +124,7 @@ class ToolCallEvent(Event):
     id: str = ""
     name: str = ""
     arguments: dict[str, Any] = field(default_factory=dict)
+    finish_reason: FinishReason = FinishReason.TOOL_CALLS
 
 
 @dataclass
@@ -136,3 +156,4 @@ class DoneEvent(Event):
     type: EventType = field(default=EventType.DONE)
     final_text: str = ""
     session_id: str | None = None
+    finish_reason: FinishReason = FinishReason.STOP

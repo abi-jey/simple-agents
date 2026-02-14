@@ -16,6 +16,7 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
+from ..events import FinishReason
 from ..http import HTTPClient
 from ..provider import ProviderType
 from ..types import GenerationConfig
@@ -26,6 +27,7 @@ from .types import BatchRequest
 from .types import BatchRequestCounts
 from .types import BatchResult
 from .types import BatchStatus
+from .types import UsageInfo
 
 logger = logging.getLogger(__name__)
 
@@ -318,19 +320,48 @@ class BatchClient:
 
         content = None
         tool_calls = None
+        finish_reason = FinishReason.UNKNOWN
 
         if choices:
-            message = choices[0].get("message", {})
+            choice = choices[0]
+            message = choice.get("message", {})
             content = message.get("content")
             if message.get("tool_calls"):
                 tool_calls = message["tool_calls"]
+
+            # Parse finish_reason
+            fr = choice.get("finish_reason")
+            if fr == "stop":
+                finish_reason = FinishReason.STOP
+            elif fr == "tool_calls":
+                finish_reason = FinishReason.TOOL_CALLS
+            elif fr == "length":
+                finish_reason = FinishReason.LENGTH
+            elif fr == "content_filter":
+                finish_reason = FinishReason.CONTENT_FILTER
+
+        # Parse detailed usage
+        usage = None
+        if body.get("usage"):
+            usage_data = body["usage"]
+            prompt_details = usage_data.get("prompt_tokens_details") or {}
+            completion_details = usage_data.get("completion_tokens_details") or {}
+            usage = UsageInfo(
+                prompt_tokens=usage_data.get("prompt_tokens", 0),
+                completion_tokens=usage_data.get("completion_tokens", 0),
+                total_tokens=usage_data.get("total_tokens", 0),
+                cached_tokens=prompt_details.get("cached_tokens", 0),
+                audio_tokens=prompt_details.get("audio_tokens", 0) + completion_details.get("audio_tokens", 0),
+                reasoning_tokens=completion_details.get("reasoning_tokens", 0),
+            )
 
         return BatchResult(
             custom_id=custom_id,
             result_type="succeeded",
             content=content,
             tool_calls=tool_calls,
-            usage=body.get("usage"),
+            usage=usage,
+            finish_reason=finish_reason,
             raw_response=data,
         )
 

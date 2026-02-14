@@ -12,6 +12,7 @@ from typing import Any
 from typing import Literal
 from typing import TypedDict
 
+from ..events import FinishReason
 from ..types import GenerationConfig
 from ..types import Message
 from ..types import ToolDefinition
@@ -38,6 +39,9 @@ class UsageInfo(TypedDict, total=False):
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+    cached_tokens: int
+    audio_tokens: int
+    reasoning_tokens: int
 
 
 class BatchStatus(Enum):
@@ -144,6 +148,7 @@ class BatchResult:
     content: str | None = None
     tool_calls: list[BatchToolCall] | None = None
     usage: UsageInfo | None = None
+    finish_reason: FinishReason = FinishReason.UNKNOWN
 
     # For errored results
     error_type: str | None = None

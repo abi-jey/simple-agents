@@ -112,6 +112,7 @@ from .events import DoneEvent
 from .events import ErrorEvent
 from .events import Event
 from .events import EventType
+from .events import FinishReason
 from .events import ReasoningChunkEvent
 from .events import TextChunkEvent
 from .events import TextDoneEvent
@@ -163,6 +164,7 @@ __all__ = [
     "Event",
     "EventType",
     "FileHTTPLogger",
+    "FinishReason",
     "GeminiThinkingConfig",
     "GenerationConfig",
     "ImageContent",

@@ -16,6 +16,7 @@ from .batch import BatchStatus
 from .events import DoneEvent
 from .events import ErrorEvent
 from .events import Event
+from .events import FinishReason
 from .events import TextChunkEvent
 from .events import TextDoneEvent
 from .events import TokenUsage
@@ -560,26 +561,92 @@ class Agent:
         # Get results
         full_text = ""
         usage = Usage()
+        finish_reason = FinishReason.UNKNOWN
+        tool_calls_to_execute: list[ToolCall] = []
 
         async for result in self._batch_client.get_results(job):
             if result.result_type == "succeeded":
-                if result.content:
-                    full_text = result.content
-                    yield TextDoneEvent(text=result.content, usage=usage)
+                finish_reason = result.finish_reason
 
-                # Handle usage from result
+                # Parse detailed usage
                 if result.usage:
                     usage = Usage(
                         prompt_tokens=result.usage.get("prompt_tokens", 0),
                         completion_tokens=result.usage.get("completion_tokens", 0),
                         total_tokens=result.usage.get("total_tokens", 0),
+                        cached_tokens=result.usage.get("cached_tokens", 0),
+                        audio_tokens=result.usage.get("audio_tokens", 0),
+                        reasoning_tokens=result.usage.get("reasoning_tokens", 0),
                     )
+
+                # Handle tool calls
+                if result.tool_calls:
+                    for tc in result.tool_calls:
+                        import json as json_mod
+
+                        from .types import ToolArguments
+
+                        args_str = tc.get("function", {}).get("arguments", "{}")
+                        try:
+                            args: ToolArguments = json_mod.loads(args_str) if isinstance(args_str, str) else args_str
+                        except json_mod.JSONDecodeError:
+                            args = {"raw": args_str}
+
+                        tool_call = ToolCall(
+                            id=tc.get("id", ""),
+                            name=tc.get("function", {}).get("name", ""),
+                            arguments=args,
+                        )
+                        tool_calls_to_execute.append(tool_call)
+                        yield ToolCallEvent(
+                            id=tool_call.id,
+                            name=tool_call.name,
+                            arguments=tool_call.arguments,
+                            usage=usage,
+                            finish_reason=FinishReason.TOOL_CALLS,
+                        )
+
+                # Handle text content
+                if result.content:
+                    full_text = result.content
+                    yield TextDoneEvent(
+                        text=result.content,
+                        usage=usage,
+                        finish_reason=finish_reason,
+                    )
+
             elif result.result_type == "errored":
                 yield ErrorEvent(
                     message=result.error_message or "Unknown batch error",
                     code=result.error_type,
                 )
                 return
+
+        # Execute tools if present
+        if tool_calls_to_execute:
+            tool_messages: list[Message] = []
+
+            for tool_call in tool_calls_to_execute:
+                result_event = await self.tool_executor.execute(tool_call)
+
+                yield result_event
+
+                tool_messages.append(
+                    Message(
+                        role="tool",
+                        content=str(result_event.result)
+                        if result_event.result is not None
+                        else (result_event.error or "Error"),
+                        tool_call_id=tool_call.id,
+                        name=tool_call.name,
+                    )
+                )
+
+            # Note: Batch mode doesn't support multi-turn - log warning about tool results
+            logger.warning(
+                f"Batch mode executed {len(tool_calls_to_execute)} tools but cannot continue conversation. "
+                "Tool results are not submitted back to the model in batch mode."
+            )
 
         # Add assistant message to history
         if full_text:
@@ -589,6 +656,7 @@ class Agent:
             final_text=full_text,
             session_id=session_id,
             usage=usage,
+            finish_reason=finish_reason,
         )
 
     async def run_simple(
