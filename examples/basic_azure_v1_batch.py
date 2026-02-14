@@ -95,17 +95,14 @@ async def main() -> None:
         await agent.initialize()
         console.print(f"[green]Agent initialized, model: {provider.model}[/green]")
         console.print(f"[blue]HTTP logging to: {log_file}[/blue]")
-        console.print(f"[yellow]Batch mode enabled - waiting for processing...[/yellow]")
+        console.print("[yellow]Batch mode enabled - waiting for processing...[/yellow]")
 
         query = "What time is it right now?"
         console.print(Panel(f"[bold]User:[/bold] {query}", border_style="green"))
         console.print()
 
-        response_text = ""
-
         async for event in agent.run(user_message=query, session_id=session_id):
             if isinstance(event, TextDoneEvent):
-                response_text = event.text
                 console.print(
                     Panel(
                         event.text,
@@ -131,7 +128,7 @@ async def main() -> None:
                     style="dim",
                 )
                 console.print(usage_text)
-                console.print(f"[green]Cost savings: 50% compared to real-time API[/green]")
+                console.print("[green]Cost savings: 50% compared to real-time API[/green]")
                 console.print(f"[dim]HTTP traffic logged to: {log_file.absolute()}[/dim]")
 
     finally:
