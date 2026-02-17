@@ -41,26 +41,29 @@ load_dotenv()
 logger = getLogger(__name__)
 console = Console()
 
-# Configuration - edit these values for your Azure OpenAI resource
-AZURE_RESOURCE_NAME = "agent-test-abbas"  # Your Azure OpenAI resource name
-AZURE_API_KEY = os.getenv("AZURE_DEPLOYED_MODEL_KEY")  # API key
-# NOTE: You need a Global-Batch deployment type for batch processing
-# Check your deployments in Azure OpenAI Studio and use the name of a Global-Batch deployment
-BATCH_DEPLOYMENT_NAME = os.getenv("AZURE_DEPLOYED_MODEL_NAME", "Kimi-K2.5")  # Model/deployment name
+
+def get_time(tz: str = "UTC") -> str:
+    """Get the current time in a specific timezone."""
+    now = datetime.now(UTC)
+    return f"Current time in {tz}: {now.strftime('%Y-%m-%d %H:%M:%S')}"
 
 
 def get_azure_batch_provider() -> Provider:
     """Create a Provider configured for Azure OpenAI V1 API with batch support."""
-    api_key = AZURE_API_KEY
+    endpoint = os.getenv("AZURE_DEPLOYED_MODEL_ENDPOINT")
+    api_key = os.getenv("AZURE_DEPLOYED_MODEL_KEY")  # API key
+    model_name = os.getenv("AZURE_NEW_FOUNDRY_PROJECT_MODEL_NAME")  # Model/deployment name
+
+    if not endpoint:
+        raise ValueError("AZURE_DEPLOYED_MODEL_ENDPOINT not set. Please set it in your .env file.")
     if not api_key:
-        raise ValueError("AZURE_DEPLOYED_MODEL_NAME (API key) not set in environment.")
+        raise ValueError("AZURE_DEPLOYED_MODEL_KEY (API key) not set. Please set it in your .env file.")
+    if not model_name:
+        raise ValueError("AZURE_DEPLOYED_MODEL_NAME (model name) not set. Please set it in your .env file.")
 
-    resource_name = AZURE_RESOURCE_NAME
-    model_name = BATCH_DEPLOYMENT_NAME
-
-    # Azure OpenAI V1 API base URL format
-    # https://{resource-name}.openai.azure.com/openai/v1/
-    base_url = f"https://{resource_name}.openai.azure.com/openai"
+    # For V1 API, base_url should include /openai suffix
+    # URL format: https://{resource}.openai.azure.com/openai/v1/chat/completions
+    base_url = f"{endpoint.rstrip('/')}/openai"
 
     console.print(f"[dim]Azure V1 endpoint: {base_url}[/dim]")
     console.print(f"[dim]Model (deployment): {model_name}[/dim]")
@@ -91,7 +94,7 @@ async def main() -> None:
     agent = Agent(
         provider=provider,
         session_manager=session_manager,
-        tools=[],  # No tools for simple batch example
+        tools=[get_time],
         system_prompt="You are a helpful assistant.",
         streaming=False,
         batch=True,
@@ -105,7 +108,7 @@ async def main() -> None:
         console.print(f"[blue]HTTP logging to: {log_file}[/blue]")
         console.print("[yellow]Batch mode enabled - 50% cost discount![/yellow]")
 
-        query = "What is the capital of France? Give a brief answer."
+        query = "What is the time?"
         console.print(Panel(f"[bold]User:[/bold] {query}", border_style="green"))
         console.print()
 

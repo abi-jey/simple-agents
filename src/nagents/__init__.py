@@ -127,6 +127,9 @@ from .http import FileHTTPLogger
 from .provider import Provider
 from .provider import ProviderType
 from .session import SessionManager
+from .stt import GeminiSTTService
+from .stt import STTService
+from .stt import TranscriptionResult
 from .tools import ToolExecutor
 from .tools import ToolRegistry
 from .types import AudioContent
@@ -165,6 +168,7 @@ __all__ = [
     "EventType",
     "FileHTTPLogger",
     "FinishReason",
+    "GeminiSTTService",
     "GeminiThinkingConfig",
     "GenerationConfig",
     "ImageContent",
@@ -176,6 +180,7 @@ __all__ = [
     "Provider",
     "ProviderType",
     "ReasoningChunkEvent",
+    "STTService",
     "SessionManager",
     "TextChunkEvent",
     "TextContent",
@@ -191,6 +196,7 @@ __all__ = [
     "ToolRegistry",
     "ToolResultEvent",
     "ToolResultType",
+    "TranscriptionResult",
     "Usage",
     "UsageInfo",
 ]

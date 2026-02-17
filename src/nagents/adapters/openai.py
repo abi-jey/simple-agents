@@ -32,15 +32,7 @@ def _format_content_part(part: ContentPart) -> dict[str, Any]:
         return {"type": "text", "text": part.text}
 
     elif isinstance(part, ImageContent):
-        # Build image_url object
-        if part.url:
-            # URL provided directly (could be regular URL or data URL)
-            image_url: dict[str, Any] = {"url": part.url}
-        elif part.base64_data and part.media_type:
-            # Build data URL from base64 data
-            image_url = {"url": f"data:{part.media_type};base64,{part.base64_data}"}
-        else:
-            raise ValueError("ImageContent must have either 'url' or both 'base64_data' and 'media_type'")
+        image_url: dict[str, Any] = {"url": f"data:{part.media_type};base64,{part.base64_data}"}
 
         if part.detail:
             image_url["detail"] = part.detail

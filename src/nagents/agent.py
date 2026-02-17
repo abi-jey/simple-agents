@@ -7,6 +7,7 @@ import uuid
 from collections.abc import AsyncIterator
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import Any
 
 from .batch import BatchClient
@@ -30,10 +31,16 @@ from .provider import ProviderType
 from .session import SessionManager
 from .tools import ToolExecutor
 from .tools import ToolRegistry
+from .types import AudioContent
+from .types import ContentPart
 from .types import GenerationConfig
 from .types import Message
+from .types import TextContent
 from .types import ToolCall
 from .types import ToolDefinition
+
+if TYPE_CHECKING:
+    from .stt import STTService
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +110,8 @@ class Agent:
         log_file: Path | str | None = None,
         fail_on_invalid_tool: bool = False,
         batch: bool = False,
-        batch_poll_interval: float = 10.0,
+        batch_poll_interval: float = 30.0,
+        stt_service: "STTService | None" = None,
     ):
         """
         Initialize the agent.
@@ -123,7 +131,10 @@ class Agent:
                                   is passed back to the LLM so it can recover.
             batch: If True, use batch processing API (50% cost discount).
                    Results are delayed but significantly cheaper.
-            batch_poll_interval: Seconds between batch status checks (default: 10)
+            batch_poll_interval: Seconds between batch status checks (default: 30)
+            stt_service: Optional Speech-to-Text service for audio transcription.
+                         If provided, audio content in messages will be transcribed
+                         to text before being sent to the LLM.
         """
         self.provider = provider
         self.session = session_manager
@@ -133,6 +144,7 @@ class Agent:
         self.fail_on_invalid_tool = fail_on_invalid_tool
         self.batch = batch
         self.batch_poll_interval = batch_poll_interval
+        self.stt_service = stt_service
 
         self.tool_registry = ToolRegistry()
         self.tool_executor = ToolExecutor(self.tool_registry)
@@ -174,6 +186,7 @@ class Agent:
             api_key=self.provider.api_key,
             model=self.provider.model,
             base_url=self.provider.base_url,
+            logger=self._http_logger,
         )
         logger.info("Batch mode enabled - requests will be processed with 50% cost discount")
 
@@ -235,9 +248,54 @@ class Agent:
         """
         return self.tool_registry.register(func, name, description)
 
+    async def _process_multimodal_content(
+        self,
+        content: str | list[ContentPart] | None,
+    ) -> str | list[ContentPart] | None:
+        """
+        Process multimodal content, transcribing audio if STT service is available.
+
+        Args:
+            content: Message content (str, list of ContentParts, or None)
+
+        Returns:
+            Processed content with audio transcribed to text
+        """
+        if content is None or isinstance(content, str):
+            return content
+
+        processed_parts: list[ContentPart] = []
+        for part in content:
+            if isinstance(part, AudioContent):
+                if self.stt_service:
+                    logger.info("Transcribing audio content...")
+                    try:
+                        result = await self.stt_service.transcribe_base64(
+                            part.base64_data,
+                            part.format,
+                        )
+                        logger.info(f"Transcription: {result.text[:100]}...")
+                        if result.text:
+                            processed_parts.append(TextContent(text=result.text))
+                        else:
+                            processed_parts.append(TextContent(text="[Audio transcription returned empty]"))
+                    except Exception as e:
+                        logger.error(f"Failed to transcribe audio: {e}")
+                        processed_parts.append(TextContent(text=f"[Audio transcription failed: {e}]"))
+                else:
+                    logger.warning(
+                        "Audio content received but no STT service configured. "
+                        "Audio will be passed to LLM if supported, or ignored."
+                    )
+                    processed_parts.append(part)
+            else:
+                processed_parts.append(part)
+
+        return processed_parts
+
     async def run(
         self,
-        user_message: str,
+        user_message: str | list[ContentPart] | Message,
         session_id: str | None = None,
         user_id: str = "default",
         config: GenerationConfig | None = None,
@@ -252,7 +310,12 @@ class Agent:
         results fed back to the model.
 
         Args:
-            user_message: The user's message
+            user_message: The user's message. Can be:
+                          - str: Simple text message
+                          - list[ContentPart]: Multimodal content (text, images, audio)
+                          - Message: Full message object
+                          If audio content is present and stt_service is configured,
+                          audio will be transcribed to text.
             session_id: Optional session identifier. If provided, verifies it exists
                         or creates a new one. If None, creates a new session.
             user_id: User identifier (default: "default")
@@ -266,20 +329,33 @@ class Agent:
         """
         await self._ensure_initialized()
 
+        # Normalize user_message to a Message object
+        message = Message(role="user", content=user_message) if isinstance(user_message, str | list) else user_message
+
+        # Process audio content through STT if present
+        processed_content = await self._process_multimodal_content(message.content)
+
+        # Create processed message
+        processed_message = Message(
+            role=message.role,
+            content=processed_content,
+            tool_calls=message.tool_calls,
+            tool_call_id=message.tool_call_id,
+            name=message.name,
+        )
+
         # Use batch mode if enabled
         if self.batch:
-            async for event in self._run_batch(user_message, session_id, user_id, config):
+            async for event in self._run_batch(processed_message, session_id, user_id, config):
                 yield event
             return
 
         # Handle session ID
         if session_id is None:
-            # Create new session with generated ID
             session_id = f"session-{uuid.uuid4().hex[:12]}"
             await self.session.get_or_create_session(session_id, user_id)
             logger.info(f"Created new session: {session_id}")
         else:
-            # Verify session exists or create it
             if await self.session.session_exists(session_id):
                 logger.debug(f"Using existing session: {session_id}")
             else:
@@ -287,7 +363,7 @@ class Agent:
                 await self.session.get_or_create_session(session_id, user_id)
 
         # Add user message to history
-        await self.session.add_message(session_id, Message(role="user", content=user_message))
+        await self.session.add_message(session_id, processed_message)
 
         # Set session ID for HTTP logging
         self.provider.set_session_id(session_id)
@@ -483,18 +559,16 @@ class Agent:
 
     async def _run_batch(
         self,
-        user_message: str,
-        session_id: str | None = None,
-        user_id: str = "default",
-        config: GenerationConfig | None = None,
+        user_message: Message,
+        session_id: str | None,
+        user_id: str | None,
+        config: GenerationConfig | None,
     ) -> AsyncIterator[Event]:
-        """
-        Run using batch processing API (50% cost discount).
+        """Run with batch processing for cost-effective large-scale operations.
 
         This method submits the request as a batch job, waits for completion,
-        and yields events from the results.
-
-        Note: Batch mode does not support streaming or multi-turn tool execution.
+        and yields events from the results. Supports multi-turn tool execution
+        by submitting subsequent batches with tool results.
         """
         if not self._batch_client:
             yield ErrorEvent(message="Batch client not initialized")
@@ -503,170 +577,199 @@ class Agent:
         # Handle session ID
         if session_id is None:
             session_id = f"batch-session-{uuid.uuid4().hex[:12]}"
-            await self.session.get_or_create_session(session_id, user_id)
+            await self.session.get_or_create_session(session_id, user_id or "default")
             logger.info(f"Created new batch session: {session_id}")
         else:
             if not await self.session.session_exists(session_id):
-                await self.session.get_or_create_session(session_id, user_id)
+                await self.session.get_or_create_session(session_id, user_id or "default")
 
         # Add user message to history
-        await self.session.add_message(session_id, Message(role="user", content=user_message))
+        await self.session.add_message(session_id, user_message)
 
-        # Get current history for the batch request
-        history = await self.session.get_history(session_id)
+        # Set session ID for HTTP logging in batch client
+        if self._batch_client:
+            self._batch_client.set_session_id(session_id)
 
-        # Build messages for batch request
-        messages: list[Message] = []
-        if self.system_prompt:
-            messages.append(Message(role="system", content=self.system_prompt))
-        messages.extend(history)
-
-        # Create batch request
-        batch_request = BatchRequest(
-            custom_id=f"{session_id}-{uuid.uuid4().hex[:8]}",
-            messages=messages,
-            config=config,
-        )
-
-        # Submit batch
-        tools = self.tool_registry.get_all() if self.tool_registry.has_tools() else None
-        logger.info(f"Submitting batch request: {batch_request.custom_id}")
-
-        try:
-            job = await self._batch_client.create_batch(
-                requests=[batch_request],
-                config=BatchConfig(),
-                tools=tools,
-                generation_config=config,
-            )
-            logger.info(f"Batch job created: {job.id}, status: {job.status}")
-        except HTTPError as e:
-            error_msg = f"Failed to create batch: {e}"
-            if e.body:
-                error_msg += f"\nResponse: {e.body}"
-            logger.error(error_msg)
-            yield ErrorEvent(message=error_msg)
-            return
-        except Exception as e:
-            error_msg = f"Failed to create batch: {e}"
-            logger.error(error_msg)
-            yield ErrorEvent(message=error_msg)
-            return
-
-        # Wait for completion
-        logger.info("Waiting for batch completion...")
-        job = await self._batch_client.wait_for_completion(
-            job.id,
-            poll_interval=self.batch_poll_interval,
-        )
-        logger.info(f"Batch completed: {job.status}")
-
-        # Check status
-        if job.status != BatchStatus.COMPLETED:
-            yield ErrorEvent(
-                message=f"Batch job failed with status: {job.status}",
-                code=str(job.status.value),
-            )
-            return
-
-        # Get results
+        # Track accumulated usage and final text
+        total_usage = Usage()
         full_text = ""
-        usage = Usage()
         finish_reason = FinishReason.UNKNOWN
-        tool_calls_to_execute: list[ToolCall] = []
 
-        async for result in self._batch_client.get_results(job):
-            if result.result_type == "succeeded":
-                finish_reason = result.finish_reason
+        # Loop until no more tool calls
+        iteration = 0
+        while True:
+            iteration += 1
+            logger.info(f"Batch iteration {iteration}")
 
-                # Parse detailed usage
-                if result.usage:
-                    usage = Usage(
-                        prompt_tokens=result.usage.get("prompt_tokens", 0),
-                        completion_tokens=result.usage.get("completion_tokens", 0),
-                        total_tokens=result.usage.get("total_tokens", 0),
-                        cached_tokens=result.usage.get("cached_tokens", 0),
-                        audio_tokens=result.usage.get("audio_tokens", 0),
-                        reasoning_tokens=result.usage.get("reasoning_tokens", 0),
-                    )
+            # Get current history for the batch request
+            history = await self.session.get_history(session_id)
 
-                # Handle tool calls
-                if result.tool_calls:
-                    for tc in result.tool_calls:
-                        import json as json_mod
+            # Build messages for batch request
+            messages: list[Message] = []
+            if self.system_prompt:
+                messages.append(Message(role="system", content=self.system_prompt))
+            messages.extend(history)
 
-                        from .types import ToolArguments
+            # Create batch request
+            batch_request = BatchRequest(
+                custom_id=f"{session_id}-{uuid.uuid4().hex[:8]}",
+                messages=messages,
+                config=config,
+            )
 
-                        args_str = tc.get("function", {}).get("arguments", "{}")
-                        try:
-                            args: ToolArguments = json_mod.loads(args_str) if isinstance(args_str, str) else args_str
-                        except json_mod.JSONDecodeError:
-                            args = {"raw": args_str}
+            # Submit batch
+            tools = self.tool_registry.get_all() if self.tool_registry.has_tools() else None
+            logger.info(f"Submitting batch request: {batch_request.custom_id}")
 
-                        tool_call = ToolCall(
-                            id=tc.get("id", ""),
-                            name=tc.get("function", {}).get("name", ""),
-                            arguments=args,
-                        )
-                        tool_calls_to_execute.append(tool_call)
-                        yield ToolCallEvent(
-                            id=tool_call.id,
-                            name=tool_call.name,
-                            arguments=tool_call.arguments,
-                            usage=usage,
-                            finish_reason=FinishReason.TOOL_CALLS,
-                        )
+            try:
+                job = await self._batch_client.create_batch(
+                    requests=[batch_request],
+                    config=BatchConfig(),
+                    tools=tools,
+                    generation_config=config,
+                )
+                logger.info(f"Batch job created: {job.id}, status: {job.status}")
+            except HTTPError as e:
+                error_msg = f"Failed to create batch: {e}"
+                if e.body:
+                    error_msg += f"\nResponse: {e.body}"
+                logger.error(error_msg)
+                yield ErrorEvent(message=error_msg)
+                return
+            except Exception as e:
+                error_msg = f"Failed to create batch: {e}"
+                logger.error(error_msg)
+                yield ErrorEvent(message=error_msg)
+                return
 
-                # Handle text content
-                if result.content:
-                    full_text = result.content
-                    yield TextDoneEvent(
-                        text=result.content,
-                        usage=usage,
-                        finish_reason=finish_reason,
-                    )
+            # Wait for completion
+            logger.info("Waiting for batch completion...")
+            job = await self._batch_client.wait_for_completion(
+                job.id,
+                poll_interval=self.batch_poll_interval,
+            )
+            logger.info(f"Batch completed: {job.status}")
 
-            elif result.result_type == "errored":
+            # Check status
+            if job.status != BatchStatus.COMPLETED:
                 yield ErrorEvent(
-                    message=result.error_message or "Unknown batch error",
-                    code=result.error_type,
+                    message=f"Batch job failed with status: {job.status}",
+                    code=str(job.status.value),
                 )
                 return
 
-        # Execute tools if present
-        if tool_calls_to_execute:
-            tool_messages: list[Message] = []
+            # Get results
+            iteration_text = ""
+            iteration_usage = Usage()
+            iteration_finish_reason = FinishReason.UNKNOWN
+            tool_calls_to_execute: list[ToolCall] = []
 
-            for tool_call in tool_calls_to_execute:
-                result_event = await self.tool_executor.execute(tool_call)
+            async for result in self._batch_client.get_results(job):
+                if result.result_type == "succeeded":
+                    iteration_finish_reason = result.finish_reason
 
-                yield result_event
+                    # Parse detailed usage
+                    if result.usage:
+                        iteration_usage = Usage(
+                            prompt_tokens=result.usage.get("prompt_tokens", 0),
+                            completion_tokens=result.usage.get("completion_tokens", 0),
+                            total_tokens=result.usage.get("total_tokens", 0),
+                            cached_tokens=result.usage.get("cached_tokens", 0),
+                            audio_tokens=result.usage.get("audio_tokens", 0),
+                            reasoning_tokens=result.usage.get("reasoning_tokens", 0),
+                        )
+                        # Accumulate usage
+                        total_usage.prompt_tokens += iteration_usage.prompt_tokens
+                        total_usage.completion_tokens += iteration_usage.completion_tokens
+                        total_usage.total_tokens += iteration_usage.total_tokens
+                        total_usage.cached_tokens += iteration_usage.cached_tokens
+                        total_usage.audio_tokens += iteration_usage.audio_tokens
+                        total_usage.reasoning_tokens += iteration_usage.reasoning_tokens
 
-                tool_messages.append(
-                    Message(
-                        role="tool",
-                        content=str(result_event.result)
-                        if result_event.result is not None
-                        else (result_event.error or "Error"),
-                        tool_call_id=tool_call.id,
-                        name=tool_call.name,
+                    # Handle tool calls
+                    if result.tool_calls:
+                        for tc in result.tool_calls:
+                            import json as json_mod
+
+                            from .types import ToolArguments
+
+                            args_str = tc.get("function", {}).get("arguments", "{}")
+                            try:
+                                args: ToolArguments = (
+                                    json_mod.loads(args_str) if isinstance(args_str, str) else args_str
+                                )
+                            except json_mod.JSONDecodeError:
+                                args = {"raw": args_str}
+
+                            tool_call = ToolCall(
+                                id=tc.get("id", ""),
+                                name=tc.get("function", {}).get("name", ""),
+                                arguments=args,
+                            )
+                            tool_calls_to_execute.append(tool_call)
+                            yield ToolCallEvent(
+                                id=tool_call.id,
+                                name=tool_call.name,
+                                arguments=tool_call.arguments,
+                                usage=iteration_usage,
+                                finish_reason=FinishReason.TOOL_CALLS,
+                            )
+
+                    # Handle text content
+                    if result.content:
+                        iteration_text = result.content
+                        yield TextDoneEvent(
+                            text=result.content,
+                            usage=iteration_usage,
+                            finish_reason=iteration_finish_reason,
+                        )
+
+                elif result.result_type == "errored":
+                    yield ErrorEvent(
+                        message=result.error_message or "Unknown batch error",
+                        code=result.error_type,
                     )
+                    return
+
+            # Check if we have tool calls to execute
+            if tool_calls_to_execute:
+                # Execute tools
+                for tool_call in tool_calls_to_execute:
+                    result_event = await self.tool_executor.execute(tool_call)
+                    yield result_event
+
+                    # Add tool result to history
+                    await self.session.add_message(
+                        session_id,
+                        Message(
+                            role="tool",
+                            content=str(result_event.result)
+                            if result_event.result is not None
+                            else (result_event.error or "Error"),
+                            tool_call_id=tool_call.id,
+                            name=tool_call.name,
+                        ),
+                    )
+
+                # Continue the loop - will submit new batch with tool results
+                logger.info(
+                    f"Batch iteration {iteration} completed with {len(tool_calls_to_execute)} tool calls, continuing..."
                 )
+                continue
 
-            # Note: Batch mode doesn't support multi-turn - log warning about tool results
-            logger.warning(
-                f"Batch mode executed {len(tool_calls_to_execute)} tools but cannot continue conversation. "
-                "Tool results are not submitted back to the model in batch mode."
-            )
+            # No tool calls - we're done
+            full_text = iteration_text
+            finish_reason = iteration_finish_reason
+            break
 
-        # Add assistant message to history
+        # Add final assistant message to history
         if full_text:
             await self.session.add_message(session_id, Message(role="assistant", content=full_text))
 
         yield DoneEvent(
             final_text=full_text,
             session_id=session_id,
-            usage=usage,
+            usage=total_usage,
             finish_reason=finish_reason,
         )
 

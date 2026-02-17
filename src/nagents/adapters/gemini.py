@@ -32,38 +32,12 @@ def _format_content_part(part: ContentPart) -> dict[str, Any]:
         return {"text": part.text}
 
     elif isinstance(part, ImageContent):
-        # Gemini uses inline_data for base64 images
-        if part.base64_data and part.media_type:
-            return {
-                "inline_data": {
-                    "mime_type": part.media_type,
-                    "data": part.base64_data,
-                }
+        return {
+            "inline_data": {
+                "mime_type": part.media_type,
+                "data": part.base64_data,
             }
-        elif part.url:
-            # Check if it's a data URL
-            if part.url.startswith("data:"):
-                # Parse data URL: data:image/jpeg;base64,<data>
-                try:
-                    header, data = part.url.split(",", 1)
-                    mime_type = header.split(":")[1].split(";")[0]
-                    return {
-                        "inline_data": {
-                            "mime_type": mime_type,
-                            "data": data,
-                        }
-                    }
-                except (IndexError, ValueError) as err:
-                    raise ValueError(f"Invalid data URL format: {part.url[:50]}...") from err
-            else:
-                # Regular URL - Gemini supports file_data for URLs
-                return {
-                    "file_data": {
-                        "file_uri": part.url,
-                    }
-                }
-        else:
-            raise ValueError("ImageContent must have either 'url' or both 'base64_data' and 'media_type'")
+        }
 
     elif isinstance(part, AudioContent):
         # Gemini supports audio via inline_data

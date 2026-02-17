@@ -65,15 +65,12 @@ class ImageContent:
     """
     Image content part.
 
-    Supports both URL-based and base64-encoded images.
-    - For URL: Set `url` (can be a data URL like "data:image/jpeg;base64,...")
-    - For base64: Set `base64_data` and `media_type`
+    Requires base64-encoded image data with media type.
     """
 
+    base64_data: str
+    media_type: str  # e.g., "image/jpeg", "image/png", "image/gif", "image/webp"
     type: Literal["image"] = "image"
-    url: str | None = None  # URL or data URL
-    base64_data: str | None = None  # Raw base64 data (without data URL prefix)
-    media_type: str | None = None  # e.g., "image/jpeg", "image/png", "image/gif", "image/webp"
     detail: str | None = None  # OpenAI-specific: "auto", "low", "high"
 
 

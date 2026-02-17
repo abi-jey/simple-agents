@@ -14,8 +14,12 @@ import io
 import json
 import logging
 from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import Literal
+
+if TYPE_CHECKING:
+    from ..http import HTTPLogger
 
 from ..events import FinishReason
 from ..http import HTTPClient
@@ -76,6 +80,7 @@ class BatchClient:
         model: str,
         base_url: str | None = None,
         timeout: float = 120.0,
+        logger: "HTTPLogger | None" = None,
     ):
         """
         Initialize the batch client.
@@ -86,6 +91,7 @@ class BatchClient:
             model: Default model for batch requests
             base_url: Optional custom base URL
             timeout: Request timeout in seconds
+            logger: Optional HTTP logger for request/response logging
         """
         if provider_type == ProviderType.GEMINI_NATIVE:
             raise ValueError("Batch processing is not supported for Gemini native API. Use Vertex AI instead.")
@@ -93,7 +99,7 @@ class BatchClient:
         self.provider_type = provider_type
         self.api_key = api_key
         self.model = model
-        self._http = HTTPClient(timeout=timeout)
+        self._http = HTTPClient(timeout=timeout, logger=logger)
 
         # Set base URLs based on provider type
         if provider_type == ProviderType.AZURE_OPENAI_COMPATIBLE_V1:
@@ -118,6 +124,20 @@ class BatchClient:
             ProviderType.AZURE_OPENAI_COMPATIBLE,
             ProviderType.AZURE_OPENAI_COMPATIBLE_V1,
         )
+
+    def set_session_id(self, session_id: str | None) -> None:
+        """Set the current session ID for logging."""
+        self._http.set_session_id(session_id)
+
+    def _log_file_request(self, method: str, url: str, headers: dict[str, str], filename: str) -> None:
+        """Log a file upload/download request."""
+        if self._http._logger:
+            self._http._logger.log_request(method, url, headers, {"file": filename}, self._http._session_id)
+
+    def _log_file_response(self, url: str, status: int, body: str) -> None:
+        """Log a file upload/download response."""
+        if self._http._logger:
+            self._http._logger.log_response(url, status, body, self._http._session_id)
 
     def _get_headers(self, for_file_upload: bool = False) -> dict[str, str]:
         """Get headers for API requests."""
@@ -214,6 +234,10 @@ class BatchClient:
 
         # Step 1: Upload the file
         upload_url = f"{self.base_url}/files"
+        upload_headers = self._get_file_upload_headers()
+
+        # Log file upload request
+        self._log_file_request("POST", upload_url, upload_headers, "batch_input.jsonl")
 
         # Use multipart form data for file upload
         import aiohttp
@@ -231,14 +255,17 @@ class BatchClient:
             aiohttp.ClientSession() as session,
             session.post(
                 upload_url,
-                headers=self._get_file_upload_headers(),
+                headers=upload_headers,
                 data=form,
             ) as resp,
         ):
+            response_text = await resp.text()
+            # Log file upload response
+            self._log_file_response(upload_url, resp.status, response_text)
+
             if resp.status >= 400:
-                error_text = await resp.text()
-                raise RuntimeError(f"Failed to upload batch file: {resp.status} {error_text}")
-            file_response = await resp.json()
+                raise RuntimeError(f"Failed to upload batch file: {resp.status} {response_text}")
+            file_response = json.loads(response_text)
 
         input_file_id = file_response["id"]
         logger.info(f"Uploaded batch input file: {input_file_id}")
@@ -303,11 +330,19 @@ class BatchClient:
     async def _get_results_openai(self, job: BatchJob) -> AsyncIterator[BatchResult]:
         """Stream results from OpenAI batch."""
         if not job.output_file_id:
-            logger.warning("No output file ID available")
+            if job.error_file_id:
+                logger.warning(f"No output file, but error file exists: {job.error_file_id}")
+                async for result in self._get_error_results(job):
+                    yield result
+            else:
+                logger.warning("No output file ID or error file ID available")
             return
 
         url = f"{self.base_url}/files/{job.output_file_id}/content"
         headers = self._get_headers()
+
+        # Log file download request
+        self._log_file_request("GET", url, headers, f"results_{job.output_file_id}")
 
         # Download file content
         import aiohttp
@@ -316,10 +351,12 @@ class BatchClient:
             aiohttp.ClientSession() as session,
             session.get(url, headers=headers) as resp,
         ):
-            if resp.status >= 400:
-                error_text = await resp.text()
-                raise RuntimeError(f"Failed to download results: {resp.status} {error_text}")
             content = await resp.text()
+            # Log file download response
+            self._log_file_response(url, resp.status, content)
+
+            if resp.status >= 400:
+                raise RuntimeError(f"Failed to download results: {resp.status} {content}")
 
         # Parse JSONL
         for line in content.strip().split("\n"):
@@ -407,6 +444,45 @@ class BatchClient:
             finish_reason=finish_reason,
             raw_response=data,
         )
+
+    async def _get_error_results(self, job: BatchJob) -> AsyncIterator[BatchResult]:
+        """Stream error results from OpenAI batch error file."""
+        if not job.error_file_id:
+            return
+
+        url = f"{self.base_url}/files/{job.error_file_id}/content"
+        headers = self._get_headers()
+
+        self._log_file_request("GET", url, headers, f"errors_{job.error_file_id}")
+
+        import aiohttp
+
+        async with (
+            aiohttp.ClientSession() as session,
+            session.get(url, headers=headers) as resp,
+        ):
+            content = await resp.text()
+            self._log_file_response(url, resp.status, content)
+
+            if resp.status >= 400:
+                raise RuntimeError(f"Failed to download error file: {resp.status} {content}")
+
+        for line in content.strip().split("\n"):
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                custom_id = data.get("custom_id", "")
+                error = data.get("error", {})
+                yield BatchResult(
+                    custom_id=custom_id,
+                    result_type="errored",
+                    error_type=error.get("code", "unknown"),
+                    error_message=error.get("message", "Unknown error"),
+                    raw_response=data,
+                )
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse error line: {line[:100]}")
 
     async def _cancel_batch_openai(self, batch_id: str) -> BatchJob:
         """Cancel OpenAI batch."""
@@ -761,8 +837,12 @@ class BatchClient:
             BatchStatus.FINALIZING,
         }
 
+        poll_count = 0
         while True:
+            poll_count += 1
             job = await self.get_batch(batch_id)
+            elapsed = time.time() - start
+            logger.info(f"Batch {batch_id} status check #{poll_count}: {job.status.value} (elapsed: {elapsed:.1f}s)")
 
             if job.status not in active_statuses:
                 return job
@@ -770,6 +850,7 @@ class BatchClient:
             if max_wait and (time.time() - start) > max_wait:
                 raise TimeoutError(f"Batch {batch_id} did not complete within {max_wait} seconds")
 
+            logger.info(f"Waiting {poll_interval}s before next status check...")
             await asyncio.sleep(poll_interval)
 
     async def close(self) -> None:
