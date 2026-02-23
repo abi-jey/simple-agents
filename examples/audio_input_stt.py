@@ -45,7 +45,6 @@ from nagents import ContentPart
 from nagents import DoneEvent
 from nagents import ErrorEvent
 from nagents import GeminiSTTService
-from nagents import ImageContent
 from nagents import Provider
 from nagents import ProviderType
 from nagents import SessionManager
@@ -159,7 +158,7 @@ async def main() -> None:
         console.print("[yellow]No audio file found, using simulated example[/yellow]")
         console.print("[dim]To test with real audio, place a file at examples/test_audio.ogg[/dim]")
 
-        user_content: list[ContentPart] = [
+        user_content = [
             TextContent(text="Hello, can you tell me a short joke?"),
         ]
 

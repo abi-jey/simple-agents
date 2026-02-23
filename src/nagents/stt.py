@@ -142,9 +142,10 @@ class STTService(ABC):
         audio_data = base64.b64decode(base64_data)
         return await self.transcribe(audio_data, format, language)
 
+    @abstractmethod
     async def close(self) -> None:
         """Close the STT service and release resources."""
-        pass
+        ...
 
 
 class GeminiSTTService(STTService):

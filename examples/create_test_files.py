@@ -16,6 +16,7 @@ Then run the image example:
     poetry run python examples/image_input_azure_v1.py
 """
 
+import contextlib
 from pathlib import Path
 
 try:
@@ -60,10 +61,8 @@ def create_test_image_png(output_path: Path, size: tuple[int, int] = (400, 300))
     draw.ellipse([200, 50, 350, 200], fill=(100, 255, 100), outline=(50, 200, 50))
     draw.polygon([(100, 200), (50, 280), (150, 280)], fill=(100, 100, 255))
 
-    try:
+    with contextlib.suppress(Exception):
         draw.text((120, 100), "Test Image", fill=(255, 255, 255))
-    except Exception:
-        pass
 
     img.save(output_path)
     log(f"Created: {output_path}", "green")
@@ -71,8 +70,6 @@ def create_test_image_png(output_path: Path, size: tuple[int, int] = (400, 300))
 
 def create_minimal_png(output_path: Path) -> None:
     """Create a minimal valid PNG file without PIL."""
-    import math
-    import struct
     import zlib
 
     def png_chunk(chunk_type: bytes, data: bytes) -> bytes:
