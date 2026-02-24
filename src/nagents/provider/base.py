@@ -508,6 +508,7 @@ class Provider:
                     usage=latest_usage,
                     finish_reason=FinishReason.TOOL_CALLS,
                     extra=extra,
+                    metadata=tc.metadata,
                 )
         elif full_text:
             yield TextDoneEvent(text=full_text, usage=latest_usage, finish_reason=finish_reason, extra=extra)
@@ -581,6 +582,7 @@ class Provider:
                     usage=latest_usage,
                     finish_reason=FinishReason.TOOL_CALLS,
                     extra=extra,
+                    metadata=tc.metadata,
                 )
         else:
             # Handle text response
@@ -663,6 +665,7 @@ class Provider:
                     usage=latest_usage,
                     finish_reason=FinishReason.TOOL_CALLS,
                     extra=extra,
+                    metadata=tc.metadata,
                 )
         elif full_text:
             yield TextDoneEvent(text=full_text, usage=latest_usage, finish_reason=finish_reason, extra=extra)
@@ -713,6 +716,7 @@ class Provider:
                     usage=latest_usage,
                     finish_reason=FinishReason.TOOL_CALLS,
                     extra=extra,
+                    metadata=tc.metadata,
                 )
         elif text:
             yield TextDoneEvent(text=text, usage=latest_usage, finish_reason=finish_reason, extra=extra)
@@ -853,6 +857,7 @@ class Provider:
                     arguments=tc.arguments,
                     usage=latest_usage,
                     finish_reason=FinishReason.TOOL_CALLS,
+                    metadata=tc.metadata,
                 )
         elif full_text:
             yield TextDoneEvent(text=full_text, usage=latest_usage, finish_reason=finish_reason)
@@ -904,6 +909,7 @@ class Provider:
                     usage=latest_usage,
                     finish_reason=FinishReason.TOOL_CALLS,
                     extra=extra,
+                    metadata=tc.metadata,
                 )
         elif text:
             yield TextDoneEvent(text=text, usage=latest_usage, finish_reason=finish_reason, extra=extra)

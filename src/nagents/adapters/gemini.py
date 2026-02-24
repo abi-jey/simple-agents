@@ -168,14 +168,17 @@ def format_contents(messages: list[Message]) -> list[dict[str, Any]]:
         # Add function calls (for model messages)
         if msg.tool_calls:
             for tc in msg.tool_calls:
-                parts.append(
-                    {
-                        "functionCall": {
-                            "name": tc.name,
-                            "args": tc.arguments,
-                        }
+                fc_part: dict[str, Any] = {
+                    "functionCall": {
+                        "name": tc.name,
+                        "args": tc.arguments,
                     }
-                )
+                }
+                # Preserve thought signature for multi-turn context continuity
+                # Gemini thinking models require this to maintain reasoning state
+                if tc.metadata.get("thoughtSignature"):
+                    fc_part["thoughtSignature"] = tc.metadata["thoughtSignature"]
+                parts.append(fc_part)
 
         # Add function response (for tool result messages)
         if msg.role == "tool" and msg.name:
@@ -264,11 +267,18 @@ def parse_response(
             # Extract function calls
             if "functionCall" in part:
                 fc = part["functionCall"]
+                metadata: dict[str, str] = {}
+                # Preserve thought signature for multi-turn context continuity
+                # Gemini thinking models (3.x, 2.5) attach thoughtSignature to
+                # functionCall parts; it must be sent back in subsequent turns.
+                if "thoughtSignature" in part:
+                    metadata["thoughtSignature"] = part["thoughtSignature"]
                 tool_calls.append(
                     ToolCall(
                         id=str(uuid.uuid4()),  # Gemini doesn't provide IDs
                         name=fc.get("name", ""),
                         arguments=fc.get("args", {}),
+                        metadata=metadata,
                     )
                 )
 

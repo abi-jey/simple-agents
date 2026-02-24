@@ -430,6 +430,7 @@ class Agent:
                             id=event.id,
                             name=event.name,
                             arguments=event.arguments,
+                            metadata=event.metadata,
                         )
                     )
                 elif isinstance(event, ErrorEvent):
@@ -713,6 +714,7 @@ class Agent:
                                 arguments=tool_call.arguments,
                                 usage=iteration_usage,
                                 finish_reason=FinishReason.TOOL_CALLS,
+                                metadata=tool_call.metadata,
                             )
 
                     # Handle text content

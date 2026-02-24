@@ -112,6 +112,9 @@ class ToolCall:
     id: str
     name: str
     arguments: ToolArguments = field(default_factory=dict)
+    # Provider-specific metadata (e.g., Gemini thought signatures)
+    # Preserved across serialization for multi-turn context continuity
+    metadata: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

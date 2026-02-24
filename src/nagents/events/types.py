@@ -125,6 +125,8 @@ class ToolCallEvent(Event):
     name: str = ""
     arguments: dict[str, Any] = field(default_factory=dict)
     finish_reason: FinishReason = FinishReason.TOOL_CALLS
+    # Provider-specific metadata (e.g., Gemini thought signatures)
+    metadata: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
