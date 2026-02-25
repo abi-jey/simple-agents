@@ -247,7 +247,7 @@ class Provider:
         Returns:
             MediaCapabilities describing supported audio, image, and document formats.
         """
-        return get_media_capabilities(self.provider_type, self.model)
+        return get_media_capabilities(self.provider_type.value, self.model)
 
     async def generate(
         self,

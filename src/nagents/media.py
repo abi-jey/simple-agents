@@ -7,6 +7,8 @@ Provides:
 - Automatic audio transcoding via ffmpeg subprocess
 """
 
+from __future__ import annotations
+
 import asyncio
 import base64
 import logging
@@ -14,8 +16,6 @@ import tempfile
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
-
-from .provider.base import ProviderType
 
 logger = logging.getLogger(__name__)
 
@@ -106,45 +106,46 @@ class MediaCapabilities:
         return media_type in self.document_formats
 
 
-# Provider-level defaults (applied when no model override exists)
-_PROVIDER_CAPABILITIES: dict[ProviderType, MediaCapabilities] = {
-    ProviderType.OPENAI_COMPATIBLE: MediaCapabilities(
+# Provider-level defaults keyed by ProviderType.value strings.
+# Using string keys avoids a circular import with provider.base.
+_PROVIDER_CAPABILITIES: dict[str, MediaCapabilities] = {
+    "openai_compatible": MediaCapabilities(
         audio_formats=frozenset({"wav", "mp3"}),
         image_formats=frozenset({"jpeg", "jpg", "png", "gif", "webp"}),
         document_formats=frozenset(),
     ),
-    ProviderType.AZURE_OPENAI_COMPATIBLE_V1: MediaCapabilities(
+    "azure_openai_compatible_v1": MediaCapabilities(
         audio_formats=frozenset({"wav", "mp3"}),
         image_formats=frozenset({"jpeg", "jpg", "png", "gif", "webp"}),
         document_formats=frozenset(),
     ),
-    ProviderType.AZURE_OPENAI_COMPATIBLE: MediaCapabilities(
+    "azure_openai_compatible": MediaCapabilities(
         audio_formats=frozenset({"wav", "mp3"}),
         image_formats=frozenset({"jpeg", "jpg", "png", "gif", "webp"}),
         document_formats=frozenset(),
     ),
-    ProviderType.ANTHROPIC: MediaCapabilities(
+    "anthropic": MediaCapabilities(
         audio_formats=frozenset(),
         image_formats=frozenset({"jpeg", "jpg", "png", "gif", "webp"}),
         document_formats=frozenset({"pdf"}),
     ),
-    ProviderType.GEMINI_NATIVE: MediaCapabilities(
+    "gemini_native": MediaCapabilities(
         audio_formats=frozenset({"wav", "mp3", "aiff", "aac", "ogg", "flac"}),
         image_formats=frozenset({"jpeg", "jpg", "png", "webp", "heic", "heif"}),
         document_formats=frozenset({"pdf"}),
     ),
 }
 
-# Model-level overrides (take precedence over provider defaults)
-# Key: (ProviderType, model_name_prefix)
+# Model-level overrides (take precedence over provider defaults).
+# Entries: (provider_type_value, model_name_prefix, capabilities)
 # Checked in order — first prefix match wins.
-_MODEL_CAPABILITIES: list[tuple[ProviderType, str, MediaCapabilities]] = [
+_MODEL_CAPABILITIES: list[tuple[str, str, MediaCapabilities]] = [
     # -------------------------------------------------------------------------
     # Gemini models — comprehensive entries
     # -------------------------------------------------------------------------
     # Gemini 2.5 series (latest, full multimodal)
     (
-        ProviderType.GEMINI_NATIVE,
+        "gemini_native",
         "gemini-2.5-pro",
         MediaCapabilities(
             audio_formats=frozenset({"wav", "mp3", "aiff", "aac", "ogg", "flac"}),
@@ -153,7 +154,7 @@ _MODEL_CAPABILITIES: list[tuple[ProviderType, str, MediaCapabilities]] = [
         ),
     ),
     (
-        ProviderType.GEMINI_NATIVE,
+        "gemini_native",
         "gemini-2.5-flash",
         MediaCapabilities(
             audio_formats=frozenset({"wav", "mp3", "aiff", "aac", "ogg", "flac"}),
@@ -163,7 +164,7 @@ _MODEL_CAPABILITIES: list[tuple[ProviderType, str, MediaCapabilities]] = [
     ),
     # Gemini 2.0 series
     (
-        ProviderType.GEMINI_NATIVE,
+        "gemini_native",
         "gemini-2.0-flash",
         MediaCapabilities(
             audio_formats=frozenset({"wav", "mp3", "aiff", "aac", "ogg", "flac"}),
@@ -172,7 +173,7 @@ _MODEL_CAPABILITIES: list[tuple[ProviderType, str, MediaCapabilities]] = [
         ),
     ),
     (
-        ProviderType.GEMINI_NATIVE,
+        "gemini_native",
         "gemini-2.0-pro",
         MediaCapabilities(
             audio_formats=frozenset({"wav", "mp3", "aiff", "aac", "ogg", "flac"}),
@@ -182,7 +183,7 @@ _MODEL_CAPABILITIES: list[tuple[ProviderType, str, MediaCapabilities]] = [
     ),
     # Gemini 1.5 series
     (
-        ProviderType.GEMINI_NATIVE,
+        "gemini_native",
         "gemini-1.5-pro",
         MediaCapabilities(
             audio_formats=frozenset({"wav", "mp3", "aiff", "aac", "ogg", "flac"}),
@@ -191,7 +192,7 @@ _MODEL_CAPABILITIES: list[tuple[ProviderType, str, MediaCapabilities]] = [
         ),
     ),
     (
-        ProviderType.GEMINI_NATIVE,
+        "gemini_native",
         "gemini-1.5-flash",
         MediaCapabilities(
             audio_formats=frozenset({"wav", "mp3", "aiff", "aac", "ogg", "flac"}),
@@ -204,7 +205,7 @@ _MODEL_CAPABILITIES: list[tuple[ProviderType, str, MediaCapabilities]] = [
     # -------------------------------------------------------------------------
     # GPT-4o supports audio input
     (
-        ProviderType.OPENAI_COMPATIBLE,
+        "openai_compatible",
         "gpt-4o",
         MediaCapabilities(
             audio_formats=frozenset({"wav", "mp3"}),
@@ -214,7 +215,7 @@ _MODEL_CAPABILITIES: list[tuple[ProviderType, str, MediaCapabilities]] = [
     ),
     # GPT-4 vision models — images only, no audio
     (
-        ProviderType.OPENAI_COMPATIBLE,
+        "openai_compatible",
         "gpt-4-turbo",
         MediaCapabilities(
             audio_formats=frozenset(),
@@ -223,7 +224,7 @@ _MODEL_CAPABILITIES: list[tuple[ProviderType, str, MediaCapabilities]] = [
         ),
     ),
     (
-        ProviderType.OPENAI_COMPATIBLE,
+        "openai_compatible",
         "gpt-4-vision",
         MediaCapabilities(
             audio_formats=frozenset(),
@@ -234,7 +235,7 @@ _MODEL_CAPABILITIES: list[tuple[ProviderType, str, MediaCapabilities]] = [
 ]
 
 
-def get_media_capabilities(provider_type: ProviderType, model: str) -> MediaCapabilities:
+def get_media_capabilities(provider_type_value: str, model: str) -> MediaCapabilities:
     """
     Resolve media capabilities for a provider+model combination.
 
@@ -242,7 +243,8 @@ def get_media_capabilities(provider_type: ProviderType, model: str) -> MediaCapa
     Uses prefix matching for model names (e.g. "gpt-4o" matches "gpt-4o-2024-08-06").
 
     Args:
-        provider_type: The provider type
+        provider_type_value: The provider type enum value string
+                             (e.g. "openai_compatible", "gemini_native")
         model: The model identifier
 
     Returns:
@@ -250,12 +252,12 @@ def get_media_capabilities(provider_type: ProviderType, model: str) -> MediaCapa
     """
     # Check model-level overrides (first prefix match wins)
     for cap_provider, cap_prefix, capabilities in _MODEL_CAPABILITIES:
-        if cap_provider == provider_type and model.startswith(cap_prefix):
+        if cap_provider == provider_type_value and model.startswith(cap_prefix):
             return capabilities
 
     # Fall back to provider-level defaults
     return _PROVIDER_CAPABILITIES.get(
-        provider_type,
+        provider_type_value,
         MediaCapabilities(),  # Empty capabilities if provider is unknown
     )
 
