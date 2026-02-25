@@ -26,6 +26,7 @@ from .events import Usage
 from .exceptions import ToolHallucinationError
 from .http import FileHTTPLogger
 from .http import HTTPError
+from .media import transcode_audio_to_wav
 from .provider import Provider
 from .provider import ProviderType
 from .session import SessionManager
@@ -283,11 +284,25 @@ class Agent:
                         logger.error(f"Failed to transcribe audio: {e}")
                         processed_parts.append(TextContent(text=f"[Audio transcription failed: {e}]"))
                 else:
-                    logger.warning(
-                        "Audio content received but no STT service configured. "
-                        "Audio will be passed to LLM if supported, or ignored."
-                    )
-                    processed_parts.append(part)
+                    # No STT service — pass audio through to the LLM.
+                    # Check if the provider supports this audio format and
+                    # auto-transcode to WAV if not.
+                    capabilities = self.provider.supported_media_formats
+                    if capabilities.audio_formats and not capabilities.supports_audio(part.format):
+                        logger.info(
+                            f"Audio format '{part.format}' not supported by provider "
+                            f"(supported: {sorted(capabilities.audio_formats)}). "
+                            "Transcoding to WAV via ffmpeg..."
+                        )
+                        try:
+                            wav_data = await transcode_audio_to_wav(part.base64_data, part.format)
+                            processed_parts.append(AudioContent(base64_data=wav_data, format="wav"))
+                            logger.info(f"Transcoded audio from '{part.format}' to 'wav' successfully")
+                        except RuntimeError as e:
+                            logger.error(f"Audio transcoding failed: {e}")
+                            processed_parts.append(TextContent(text=f"[Audio transcoding failed: {e}]"))
+                    else:
+                        processed_parts.append(part)
             else:
                 processed_parts.append(part)
 

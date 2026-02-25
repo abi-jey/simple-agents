@@ -12,19 +12,12 @@ from pathlib import Path
 from typing import Any
 
 from .http import HTTPClient
+from .media import AUDIO_MIME_TYPES
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_AUDIO_FORMATS = {
-    "wav": "audio/wav",
-    "mp3": "audio/mpeg",
-    "ogg": "audio/ogg",
-    "oga": "audio/ogg",
-    "flac": "audio/flac",
-    "m4a": "audio/mp4",
-    "webm": "audio/webm",
-    "aac": "audio/aac",
-}
+# Re-export for backward compatibility
+SUPPORTED_AUDIO_FORMATS = AUDIO_MIME_TYPES
 
 
 def detect_audio_format(file_path: Path | str) -> str:
@@ -58,8 +51,8 @@ def get_mime_type(format: str) -> str:
     Returns:
         MIME type string
     """
-    if format in SUPPORTED_AUDIO_FORMATS:
-        return SUPPORTED_AUDIO_FORMATS[format]
+    if format in AUDIO_MIME_TYPES:
+        return AUDIO_MIME_TYPES[format]
     return f"audio/{format}"
 
 

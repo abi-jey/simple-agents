@@ -24,6 +24,8 @@ from ..events import ToolCallEvent
 from ..events import Usage
 from ..http import HTTPClient
 from ..http import HTTPError
+from ..media import MediaCapabilities
+from ..media import get_media_capabilities
 from ..types import GenerationConfig
 from ..types import Message
 from ..types import ToolCall
@@ -234,6 +236,18 @@ class Provider:
             None if verification has not been performed yet.
         """
         return self._model_verified
+
+    @property
+    def supported_media_formats(self) -> MediaCapabilities:
+        """Get the media format capabilities for this provider+model.
+
+        Returns model-specific overrides when available, otherwise
+        falls back to provider-level defaults.
+
+        Returns:
+            MediaCapabilities describing supported audio, image, and document formats.
+        """
+        return get_media_capabilities(self.provider_type, self.model)
 
     async def generate(
         self,

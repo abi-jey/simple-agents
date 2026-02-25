@@ -124,6 +124,12 @@ from .events import Usage
 from .exceptions import NagentsError
 from .exceptions import ToolHallucinationError
 from .http import FileHTTPLogger
+from .media import AUDIO_MIME_TYPES
+from .media import DOCUMENT_MIME_TYPES
+from .media import IMAGE_MIME_TYPES
+from .media import MediaCapabilities
+from .media import get_media_capabilities
+from .media import transcode_audio_to_wav
 from .provider import Provider
 from .provider import ProviderType
 from .session import SessionManager
@@ -148,6 +154,9 @@ from .types import ToolCall
 from .types import ToolDefinition
 
 __all__ = [
+    "AUDIO_MIME_TYPES",
+    "DOCUMENT_MIME_TYPES",
+    "IMAGE_MIME_TYPES",
     "Agent",
     "AudioContent",
     "BatchClient",
@@ -175,6 +184,7 @@ __all__ = [
     "JsonSchema",
     "JsonSchemaProperty",
     "JsonValue",
+    "MediaCapabilities",
     "Message",
     "NagentsError",
     "Provider",
@@ -199,4 +209,6 @@ __all__ = [
     "TranscriptionResult",
     "Usage",
     "UsageInfo",
+    "get_media_capabilities",
+    "transcode_audio_to_wav",
 ]
