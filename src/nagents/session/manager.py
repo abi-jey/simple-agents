@@ -10,7 +10,12 @@ from typing import Any
 
 import aiosqlite
 
+from ..types import AudioContent
+from ..types import ContentPart
+from ..types import DocumentContent
+from ..types import ImageContent
 from ..types import Message
+from ..types import TextContent
 from ..types import ToolCall
 
 logger = logging.getLogger(__name__)
@@ -162,6 +167,13 @@ class SessionManager:
         if message.tool_calls:
             tool_calls_json = json.dumps([asdict(tc) for tc in message.tool_calls])
 
+        # Serialize multimodal content (list[ContentPart]) to JSON for SQLite
+        content_value: str | None
+        if isinstance(message.content, list):
+            content_value = json.dumps([asdict(part) for part in message.content])
+        else:
+            content_value = message.content
+
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
                 """INSERT INTO v2_messages
@@ -170,7 +182,7 @@ class SessionManager:
                 (
                     session_id,
                     message.role,
-                    message.content,
+                    content_value,
                     tool_calls_json,
                     message.tool_call_id,
                     message.name,
@@ -307,10 +319,47 @@ class SessionManager:
             except (json.JSONDecodeError, TypeError):
                 pass
 
+        # Deserialize content: may be plain str, None, or JSON-encoded list[ContentPart]
+        content: str | list[ContentPart] | None = row["content"]
+        if isinstance(content, str) and content.startswith("["):
+            try:
+                parts_data = json.loads(content)
+                if isinstance(parts_data, list) and parts_data:
+                    content = [self._dict_to_content_part(p) for p in parts_data]
+            except (json.JSONDecodeError, TypeError, KeyError):
+                pass  # Not valid JSON array, keep as plain string
+
         return Message(
             role=row["role"],
-            content=row["content"],
+            content=content,
             tool_calls=tool_calls,
             tool_call_id=row["tool_call_id"],
             name=row["name"],
         )
+
+    @staticmethod
+    def _dict_to_content_part(data: dict[str, Any]) -> ContentPart:
+        """Reconstruct a ContentPart dataclass from a serialized dict."""
+        part_type = data.get("type", "text")
+        if part_type == "text":
+            return TextContent(text=data.get("text", ""))
+        elif part_type == "image":
+            return ImageContent(
+                base64_data=data.get("base64_data", ""),
+                media_type=data.get("media_type", "image/jpeg"),
+                detail=data.get("detail"),
+            )
+        elif part_type == "audio":
+            return AudioContent(
+                base64_data=data.get("base64_data", ""),
+                format=data.get("format", "wav"),
+            )
+        elif part_type == "document":
+            return DocumentContent(
+                base64_data=data.get("base64_data", ""),
+                media_type=data.get("media_type", "application/pdf"),
+                title=data.get("title"),
+            )
+        else:
+            # Fallback: treat unknown types as text
+            return TextContent(text=str(data))
