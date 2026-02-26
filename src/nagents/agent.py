@@ -369,12 +369,8 @@ class Agent:
                         text="system-message: You are receiving this because the user sent an audio message, "
                         "but your model does not support direct audio input. "
                         "Audio-capable models include the Gemini family or GPT voice models (gpt-audio, gpt-4o-audio-preview). "
+                        "Alternatively, STT can be enabled to receive transcriptions instead. "
                         "Audio omitted."
-                    )
-                )
-                processed_parts.append(
-                    TextContent(
-                        text="[User sent an audio message, but STT is not enabled for this model. Audio omitted.]"
                     )
                 )
 
@@ -436,6 +432,7 @@ class Agent:
                             text="system-message: You are receiving this because the user sent an audio message, "
                             "but your model does not support direct audio input. "
                             "Audio-capable models include the Gemini family or GPT voice models (gpt-audio, gpt-4o-audio-preview). "
+                            "Alternatively, STT can be enabled to receive transcriptions instead. "
                             "Audio omitted."
                         )
                     )
