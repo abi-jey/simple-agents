@@ -109,18 +109,22 @@ class MediaCapabilities:
 # Provider-level defaults keyed by ProviderType.value strings.
 # Using string keys avoids a circular import with provider.base.
 _PROVIDER_CAPABILITIES: dict[str, MediaCapabilities] = {
+    # Most OpenAI models do NOT support input_audio content blocks.
+    # Only audio-specific models (gpt-4o-audio-preview, gpt-audio-*)
+    # accept them. Default to no audio support; model overrides add it.
     "openai_compatible": MediaCapabilities(
-        audio_formats=frozenset({"wav", "mp3"}),
+        audio_formats=frozenset(),
         image_formats=frozenset({"jpeg", "jpg", "png", "gif", "webp"}),
         document_formats=frozenset(),
     ),
+    # Azure OpenAI V1 does NOT support input_audio content blocks at all.
     "azure_openai_compatible_v1": MediaCapabilities(
-        audio_formats=frozenset({"wav", "mp3"}),
+        audio_formats=frozenset(),
         image_formats=frozenset({"jpeg", "jpg", "png", "gif", "webp"}),
         document_formats=frozenset(),
     ),
     "azure_openai_compatible": MediaCapabilities(
-        audio_formats=frozenset({"wav", "mp3"}),
+        audio_formats=frozenset(),
         image_formats=frozenset({"jpeg", "jpg", "png", "gif", "webp"}),
         document_formats=frozenset(),
     ),
@@ -201,33 +205,34 @@ _MODEL_CAPABILITIES: list[tuple[str, str, MediaCapabilities]] = [
         ),
     ),
     # -------------------------------------------------------------------------
-    # OpenAI models — audio support varies by model
+    # OpenAI models — only audio-specific models support input_audio blocks
     # -------------------------------------------------------------------------
-    # GPT-4o supports audio input
+    # gpt-4o-audio-preview — supports inline audio input
     (
         "openai_compatible",
-        "gpt-4o",
+        "gpt-4o-audio-preview",
         MediaCapabilities(
             audio_formats=frozenset({"wav", "mp3"}),
             image_formats=frozenset({"jpeg", "jpg", "png", "gif", "webp"}),
             document_formats=frozenset(),
         ),
     ),
-    # GPT-4 vision models — images only, no audio
+    # gpt-4o-mini-audio-preview — supports inline audio input
     (
         "openai_compatible",
-        "gpt-4-turbo",
+        "gpt-4o-mini-audio-preview",
         MediaCapabilities(
-            audio_formats=frozenset(),
+            audio_formats=frozenset({"wav", "mp3"}),
             image_formats=frozenset({"jpeg", "jpg", "png", "gif", "webp"}),
             document_formats=frozenset(),
         ),
     ),
+    # gpt-audio-* family — supports inline audio input
     (
         "openai_compatible",
-        "gpt-4-vision",
+        "gpt-audio",
         MediaCapabilities(
-            audio_formats=frozenset(),
+            audio_formats=frozenset({"wav", "mp3"}),
             image_formats=frozenset({"jpeg", "jpg", "png", "gif", "webp"}),
             document_formats=frozenset(),
         ),

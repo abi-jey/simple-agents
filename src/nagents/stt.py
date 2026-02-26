@@ -141,6 +141,115 @@ class STTService(ABC):
         ...
 
 
+# Supported input formats for OpenAI's /v1/audio/transcriptions endpoint.
+# See: https://developers.openai.com/api/docs/guides/speech-to-text
+OPENAI_TRANSCRIPTION_FORMATS: frozenset[str] = frozenset(
+    {"mp3", "mp4", "mpeg", "mpga", "m4a", "wav", "webm", "flac", "ogg"}
+)
+
+
+class OpenAISTTService(STTService):
+    """
+    OpenAI Speech-to-Text service.
+
+    Uses OpenAI's /v1/audio/transcriptions endpoint for audio transcription.
+    Supports: mp3, mp4, mpeg, mpga, m4a, wav, webm, flac, ogg (max 25 MB).
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gpt-4o-transcribe",
+        base_url: str = "https://api.openai.com/v1",
+        timeout: float = 60.0,
+        language: str = "",
+        prompt: str = "",
+    ):
+        """
+        Initialize OpenAI STT service.
+
+        Args:
+            api_key: OpenAI API key
+            model: Transcription model (default: gpt-4o-transcribe).
+                   Options: gpt-4o-transcribe, gpt-4o-mini-transcribe, whisper-1
+            base_url: API base URL (default: https://api.openai.com/v1)
+            timeout: Request timeout in seconds
+            language: Optional language hint in ISO-639-1 format (e.g. "en")
+            prompt: Optional prompt to guide transcription style
+        """
+        self.api_key = api_key
+        self.model = model
+        self.base_url = base_url.rstrip("/")
+        self.language = language
+        self.prompt = prompt
+        self._http = HTTPClient(timeout=timeout)
+
+    async def transcribe(
+        self,
+        audio_data: bytes,
+        format: str = "wav",
+        language: str | None = None,
+    ) -> TranscriptionResult:
+        """
+        Transcribe audio using OpenAI's transcription endpoint.
+
+        Args:
+            audio_data: Raw audio bytes
+            format: Audio format (wav, mp3, ogg, m4a, etc.)
+            language: Optional language hint in ISO-639-1 (e.g. "en").
+                      Overrides the instance-level language if provided.
+
+        Returns:
+            TranscriptionResult with transcribed text
+
+        Raises:
+            ValueError: If audio format is not supported by OpenAI
+        """
+        if format not in OPENAI_TRANSCRIPTION_FORMATS:
+            raise ValueError(
+                f"Audio format '{format}' is not supported by OpenAI transcription. "
+                f"Supported: {sorted(OPENAI_TRANSCRIPTION_FORMATS)}"
+            )
+
+        url = f"{self.base_url}/audio/transcriptions"
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+
+        mime_type = get_mime_type(format)
+        filename = f"audio.{format}"
+
+        fields: dict[str, str | tuple[str, bytes, str]] = {
+            "file": (filename, audio_data, mime_type),
+            "model": self.model,
+            "response_format": "json",
+        }
+
+        lang = language or self.language
+        if lang:
+            fields["language"] = lang
+        if self.prompt:
+            fields["prompt"] = self.prompt
+
+        response = await self._http.post_multipart(url, fields, headers)
+
+        text = response.get("text", "")
+        usage = response.get("usage", {})
+
+        return TranscriptionResult(
+            text=text.strip() if isinstance(text, str) else "",
+            language=lang or None,
+            extra={
+                "model": self.model,
+                "input_tokens": usage.get("input_tokens", 0),
+                "output_tokens": usage.get("output_tokens", 0),
+                "total_tokens": usage.get("total_tokens", 0),
+            },
+        )
+
+    async def close(self) -> None:
+        """Close the HTTP client."""
+        await self._http.close()
+
+
 class GeminiSTTService(STTService):
     """
     Gemini Speech-to-Text service.

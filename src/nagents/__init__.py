@@ -96,6 +96,8 @@ Batch Processing with Persistence:
 """
 
 from .agent import Agent
+from .agent import UnsupportedAudioBehavior
+from .agent import UnsupportedAudioError
 from .batch import BatchClient
 from .batch import BatchConfig
 from .batch import BatchJob
@@ -133,7 +135,9 @@ from .media import transcode_audio_to_wav
 from .provider import Provider
 from .provider import ProviderType
 from .session import SessionManager
+from .stt import OPENAI_TRANSCRIPTION_FORMATS
 from .stt import GeminiSTTService
+from .stt import OpenAISTTService
 from .stt import STTService
 from .stt import TranscriptionResult
 from .tools import ToolExecutor
@@ -157,6 +161,7 @@ __all__ = [
     "AUDIO_MIME_TYPES",
     "DOCUMENT_MIME_TYPES",
     "IMAGE_MIME_TYPES",
+    "OPENAI_TRANSCRIPTION_FORMATS",
     "Agent",
     "AudioContent",
     "BatchClient",
@@ -187,6 +192,7 @@ __all__ = [
     "MediaCapabilities",
     "Message",
     "NagentsError",
+    "OpenAISTTService",
     "Provider",
     "ProviderType",
     "ReasoningChunkEvent",
@@ -207,6 +213,8 @@ __all__ = [
     "ToolResultEvent",
     "ToolResultType",
     "TranscriptionResult",
+    "UnsupportedAudioBehavior",
+    "UnsupportedAudioError",
     "Usage",
     "UsageInfo",
     "get_media_capabilities",

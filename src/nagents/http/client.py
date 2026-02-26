@@ -230,6 +230,55 @@ class HTTPClient:
                         # Incomplete JSON, wait for more data
                         break
 
+    async def post_multipart(
+        self,
+        url: str,
+        fields: dict[str, str | tuple[str, bytes, str]],
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        """
+        Multipart form data POST request.
+
+        Args:
+            url: The URL to POST to
+            fields: Form fields. String values are sent as text fields.
+                     Tuple values (filename, data, content_type) are sent as
+                     file uploads.
+            headers: HTTP headers (Content-Type is set automatically)
+
+        Returns:
+            Parsed JSON response
+
+        Raises:
+            HTTPError: If the request fails
+        """
+        data = aiohttp.FormData()
+        for key, value in fields.items():
+            if isinstance(value, tuple):
+                filename, file_data, content_type = value
+                data.add_field(key, file_data, filename=filename, content_type=content_type)
+            else:
+                data.add_field(key, value)
+
+        # Log request (without binary data)
+        if self._logger:
+            log_fields = {
+                k: v if isinstance(v, str) else f"<file: {v[0]}, {len(v[1])} bytes>" for k, v in fields.items()
+            }
+            self._logger.log_request("POST", url, headers, {"multipart": log_fields}, self._session_id)
+
+        session = await self._get_session()
+        async with session.post(url, data=data, headers=headers) as resp:
+            body = await resp.text()
+
+            # Log response
+            if self._logger:
+                self._logger.log_response(url, resp.status, body, self._session_id)
+
+            if resp.status >= 400:
+                raise HTTPError(resp.status, resp.reason or "Request failed", body, url)
+            return cast("dict[str, Any]", json.loads(body))
+
     async def close(self) -> None:
         """Close the HTTP session."""
         if self._session and not self._session.closed:

@@ -6,6 +6,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from collections.abc import Callable
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
@@ -44,6 +45,33 @@ if TYPE_CHECKING:
     from .stt import STTService
 
 logger = logging.getLogger(__name__)
+
+
+class UnsupportedAudioBehavior(Enum):
+    """Controls how the agent handles audio sent to models that don't support inline audio input.
+
+    - RAISE: Raise an error immediately (default). Safest option — caller must handle audio explicitly.
+    - DROP: Silently drop the audio and replace with a text warning in the message.
+    - TRANSCRIBE: Auto-transcribe the audio to text using the configured STT service.
+                   Requires an ``stt_service`` to be provided to the Agent.
+    """
+
+    RAISE = "raise"
+    DROP = "drop"
+    TRANSCRIBE = "transcribe"
+
+
+class UnsupportedAudioError(Exception):
+    """Raised when audio content is sent to a model that does not support inline audio input."""
+
+    def __init__(self, model: str, audio_format: str):
+        self.model = model
+        self.audio_format = audio_format
+        super().__init__(
+            f"Model '{model}' does not support inline audio input (format: '{audio_format}'). "
+            "Set unsupported_audio='drop' to silently omit audio, "
+            "or unsupported_audio='transcribe' with an stt_service to auto-transcribe."
+        )
 
 
 class Agent:
@@ -113,6 +141,7 @@ class Agent:
         batch: bool = False,
         batch_poll_interval: float = 30.0,
         stt_service: "STTService | None" = None,
+        unsupported_audio: UnsupportedAudioBehavior = UnsupportedAudioBehavior.RAISE,
     ):
         """
         Initialize the agent.
@@ -136,6 +165,12 @@ class Agent:
             stt_service: Optional Speech-to-Text service for audio transcription.
                          If provided, audio content in messages will be transcribed
                          to text before being sent to the LLM.
+            unsupported_audio: How to handle audio sent to models that don't support
+                               inline audio input. Options:
+                               - RAISE (default): Raise UnsupportedAudioError
+                               - DROP: Replace audio with a text warning
+                               - TRANSCRIBE: Auto-transcribe using stt_service
+                                 (requires stt_service to be set)
         """
         self.provider = provider
         self.session = session_manager
@@ -146,6 +181,14 @@ class Agent:
         self.batch = batch
         self.batch_poll_interval = batch_poll_interval
         self.stt_service = stt_service
+        self.unsupported_audio = unsupported_audio
+
+        # Validate that TRANSCRIBE mode has an STT service
+        if self.unsupported_audio == UnsupportedAudioBehavior.TRANSCRIBE and not self.stt_service:
+            raise ValueError(
+                "unsupported_audio='transcribe' requires an stt_service to be provided. "
+                "Use OpenAISTTService or GeminiSTTService."
+            )
 
         self.tool_registry = ToolRegistry()
         self.tool_executor = ToolExecutor(self.tool_registry)
@@ -254,59 +297,152 @@ class Agent:
         content: str | list[ContentPart] | None,
     ) -> str | list[ContentPart] | None:
         """
-        Process multimodal content, transcribing audio if STT service is available.
+        Process multimodal content, handling audio based on provider capabilities
+        and the ``unsupported_audio`` configuration.
+
+        Processing order for each AudioContent part:
+
+        1. If provider supports the audio format natively → pass through.
+        2. If provider supports audio but not *this* format → transcode to WAV.
+        3. If provider does NOT support audio at all → apply ``unsupported_audio`` policy:
+           - RAISE: raise UnsupportedAudioError
+           - DROP:  replace with a TextContent warning
+           - TRANSCRIBE: use stt_service to transcribe to text
+
+        When ``stt_service`` is set independently (without ``unsupported_audio=TRANSCRIBE``),
+        audio is transcribed only when the provider doesn't support the format and
+        transcoding also isn't an option.
 
         Args:
             content: Message content (str, list of ContentParts, or None)
 
         Returns:
-            Processed content with audio transcribed to text
+            Processed content with audio handled appropriately
+
+        Raises:
+            UnsupportedAudioError: If unsupported_audio is RAISE and audio is sent
+                                    to a model that doesn't support it
         """
         if content is None or isinstance(content, str):
             return content
 
+        capabilities = self.provider.supported_media_formats
         processed_parts: list[ContentPart] = []
+
         for part in content:
-            if isinstance(part, AudioContent):
-                if self.stt_service:
-                    logger.info("Transcribing audio content...")
-                    try:
-                        result = await self.stt_service.transcribe_base64(
-                            part.base64_data,
-                            part.format,
-                        )
-                        logger.info(f"Transcription: {result.text[:100]}...")
-                        if result.text:
-                            processed_parts.append(TextContent(text=result.text))
-                        else:
-                            processed_parts.append(TextContent(text="[Audio transcription returned empty]"))
-                    except Exception as e:
-                        logger.error(f"Failed to transcribe audio: {e}")
-                        processed_parts.append(TextContent(text=f"[Audio transcription failed: {e}]"))
-                else:
-                    # No STT service — pass audio through to the LLM.
-                    # Check if the provider supports this audio format and
-                    # auto-transcode to WAV if not.
-                    capabilities = self.provider.supported_media_formats
-                    if capabilities.audio_formats and not capabilities.supports_audio(part.format):
-                        logger.info(
-                            f"Audio format '{part.format}' not supported by provider "
-                            f"(supported: {sorted(capabilities.audio_formats)}). "
-                            "Transcoding to WAV via ffmpeg..."
-                        )
-                        try:
-                            wav_data = await transcode_audio_to_wav(part.base64_data, part.format)
-                            processed_parts.append(AudioContent(base64_data=wav_data, format="wav"))
-                            logger.info(f"Transcoded audio from '{part.format}' to 'wav' successfully")
-                        except RuntimeError as e:
-                            logger.error(f"Audio transcoding failed: {e}")
-                            processed_parts.append(TextContent(text=f"[Audio transcoding failed: {e}]"))
-                    else:
-                        processed_parts.append(part)
-            else:
+            if not isinstance(part, AudioContent):
                 processed_parts.append(part)
+                continue
+
+            # Case 1: Provider supports this exact audio format → pass through
+            if capabilities.supports_audio(part.format):
+                processed_parts.append(part)
+                continue
+
+            # Case 2: Provider supports audio, but not this format → transcode to WAV
+            if capabilities.audio_formats:
+                logger.info(
+                    f"Audio format '{part.format}' not supported by provider "
+                    f"(supported: {sorted(capabilities.audio_formats)}). "
+                    "Transcoding to WAV via ffmpeg..."
+                )
+                try:
+                    wav_data = await transcode_audio_to_wav(part.base64_data, part.format)
+                    processed_parts.append(AudioContent(base64_data=wav_data, format="wav"))
+                    logger.info(f"Transcoded audio from '{part.format}' to 'wav' successfully")
+                except RuntimeError as e:
+                    logger.error(f"Audio transcoding failed: {e}")
+                    processed_parts.append(TextContent(text=f"[Audio transcoding failed: {e}]"))
+                continue
+
+            # Case 3: Provider does NOT support audio at all → apply policy
+            if self.unsupported_audio == UnsupportedAudioBehavior.RAISE:
+                raise UnsupportedAudioError(self.provider.model, part.format)
+
+            elif self.unsupported_audio == UnsupportedAudioBehavior.DROP:
+                logger.warning(
+                    f"Model '{self.provider.model}' does not support inline audio input. "
+                    "Audio content dropped (unsupported_audio='drop')."
+                )
+                processed_parts.append(
+                    TextContent(
+                        text="[Voice message received, but this model does not support audio input. "
+                        "The audio content was omitted.]"
+                    )
+                )
+
+            elif self.unsupported_audio == UnsupportedAudioBehavior.TRANSCRIBE:
+                # stt_service is guaranteed present (validated in __init__)
+                assert self.stt_service is not None
+                logger.info("Auto-transcribing audio (unsupported_audio='transcribe')...")
+                try:
+                    result = await self.stt_service.transcribe_base64(
+                        part.base64_data,
+                        part.format,
+                    )
+                    logger.info(f"Transcription: {result.text[:100]}...")
+                    if result.text:
+                        processed_parts.append(TextContent(text=result.text))
+                    else:
+                        processed_parts.append(TextContent(text="[Audio transcription returned empty]"))
+                except Exception as e:
+                    logger.error(f"Failed to transcribe audio: {e}")
+                    processed_parts.append(TextContent(text=f"[Audio transcription failed: {e}]"))
 
         return processed_parts
+
+    def _filter_unsupported_audio(self, messages: list[Message]) -> list[Message]:
+        """
+        Filter unsupported AudioContent from message history.
+
+        When a model doesn't support inline audio (empty audio_formats),
+        replaces AudioContent parts in *history* messages with TextContent warnings.
+        This prevents 400 errors from old audio in session history being sent
+        to non-audio models.
+
+        Only applies when ``unsupported_audio`` is DROP or TRANSCRIBE.
+        When RAISE, history audio should not exist (since the initial send would
+        have raised), but we still filter defensively.
+        """
+        capabilities = self.provider.supported_media_formats
+        if capabilities.audio_formats:
+            # Model supports audio — no filtering needed
+            return messages
+
+        filtered: list[Message] = []
+        for msg in messages:
+            if not isinstance(msg.content, list):
+                filtered.append(msg)
+                continue
+
+            has_audio = any(isinstance(p, AudioContent) for p in msg.content)
+            if not has_audio:
+                filtered.append(msg)
+                continue
+
+            # Replace AudioContent with text warning
+            new_parts: list[ContentPart] = []
+            for part in msg.content:
+                if isinstance(part, AudioContent):
+                    new_parts.append(
+                        TextContent(
+                            text="[Voice message received, but this model does not support audio input. "
+                            "The audio content was omitted.]"
+                        )
+                    )
+                else:
+                    new_parts.append(part)
+
+            filtered.append(
+                Message(
+                    role=msg.role,
+                    content=new_parts,
+                    tool_calls=msg.tool_calls,
+                    tool_call_id=msg.tool_call_id,
+                    name=msg.name,
+                )
+            )
+        return filtered
 
     async def run(
         self,
@@ -341,6 +477,8 @@ class Agent:
 
         Raises:
             ValueError: If model verification fails during auto-initialization
+            UnsupportedAudioError: If audio content is sent to a model that doesn't
+                                    support it and unsupported_audio is RAISE (default)
         """
         await self._ensure_initialized()
 
@@ -399,6 +537,9 @@ class Agent:
             if self.system_prompt:
                 messages.append(Message(role="system", content=self.system_prompt))
             messages.extend(history)
+
+            # Filter unsupported audio from all messages (including history)
+            messages = self._filter_unsupported_audio(messages)
 
             # Generate response
             pending_tool_calls: list[ToolCall] = []
