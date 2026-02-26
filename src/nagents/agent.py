@@ -360,14 +360,13 @@ class Agent:
                 raise UnsupportedAudioError(self.provider.model, part.format)
 
             elif self.unsupported_audio == UnsupportedAudioBehavior.DROP:
-                logger.warning(
+                logger.info(
                     f"Model '{self.provider.model}' does not support inline audio input. "
-                    "Audio content dropped (unsupported_audio='drop')."
+                    "Audio replaced with placeholder text (unsupported_audio='drop')."
                 )
                 processed_parts.append(
                     TextContent(
-                        text="[Voice message received, but this model does not support audio input. "
-                        "The audio content was omitted.]"
+                        text="[User sent an audio message, but STT is not enabled for this model. Audio omitted.]"
                     )
                 )
 
@@ -426,8 +425,7 @@ class Agent:
                 if isinstance(part, AudioContent):
                     new_parts.append(
                         TextContent(
-                            text="[Voice message received, but this model does not support audio input. "
-                            "The audio content was omitted.]"
+                            text="[User sent an audio message, but STT is not enabled for this model. Audio omitted.]"
                         )
                     )
                 else:
