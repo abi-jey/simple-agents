@@ -134,10 +134,10 @@ class BatchClient:
         if self._http._logger:
             self._http._logger.log_request(method, url, headers, {"file": filename}, self._http._session_id)
 
-    def _log_file_response(self, url: str, status: int, body: str) -> None:
+    def _log_file_response(self, url: str, status: int, body: str, headers: dict[str, str] | None = None) -> None:
         """Log a file upload/download response."""
         if self._http._logger:
-            self._http._logger.log_response(url, status, body, self._http._session_id)
+            self._http._logger.log_response(url, status, body, headers, self._http._session_id)
 
     def _get_headers(self, for_file_upload: bool = False) -> dict[str, str]:
         """Get headers for API requests."""
@@ -260,8 +260,9 @@ class BatchClient:
             ) as resp,
         ):
             response_text = await resp.text()
+            resp_headers = dict(resp.headers)
             # Log file upload response
-            self._log_file_response(upload_url, resp.status, response_text)
+            self._log_file_response(upload_url, resp.status, response_text, resp_headers)
 
             if resp.status >= 400:
                 raise RuntimeError(f"Failed to upload batch file: {resp.status} {response_text}")
@@ -352,8 +353,9 @@ class BatchClient:
             session.get(url, headers=headers) as resp,
         ):
             content = await resp.text()
+            resp_headers = dict(resp.headers)
             # Log file download response
-            self._log_file_response(url, resp.status, content)
+            self._log_file_response(url, resp.status, content, resp_headers)
 
             if resp.status >= 400:
                 raise RuntimeError(f"Failed to download results: {resp.status} {content}")
@@ -462,7 +464,8 @@ class BatchClient:
             session.get(url, headers=headers) as resp,
         ):
             content = await resp.text()
-            self._log_file_response(url, resp.status, content)
+            resp_headers = dict(resp.headers)
+            self._log_file_response(url, resp.status, content, resp_headers)
 
             if resp.status >= 400:
                 raise RuntimeError(f"Failed to download error file: {resp.status} {content}")

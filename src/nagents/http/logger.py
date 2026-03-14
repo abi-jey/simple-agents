@@ -32,6 +32,7 @@ class HTTPLogger(Protocol):
         url: str,
         status: int,
         body: str | dict[str, Any],
+        headers: dict[str, str] | None = None,
         session_id: str | None = None,
     ) -> None:
         """Log an incoming HTTP response."""
@@ -130,6 +131,7 @@ class FileHTTPLogger:
         url: str,
         status: int,
         body: str | dict[str, Any],
+        headers: dict[str, str] | None = None,
         session_id: str | None = None,
     ) -> None:
         """Log an incoming HTTP response."""
@@ -146,11 +148,14 @@ class FileHTTPLogger:
         else:
             parsed_body = body
 
-        payload = {
+        payload: dict[str, Any] = {
             "url": url,
             "status": status,
             "body": parsed_body,
         }
+
+        if headers:
+            payload["headers"] = dict(headers)
 
         entry = f"[{timestamp}] [{sid}] <<< RESPONSE {json.dumps(payload, ensure_ascii=False)}"
         self._write_log(entry)

@@ -81,10 +81,11 @@ class HTTPClient:
         session = await self._get_session()
         async with session.post(url, json=data, headers=headers) as resp:
             body = await resp.text()
+            resp_headers = dict(resp.headers)
 
             # Log response
             if self._logger:
-                self._logger.log_response(url, resp.status, body, self._session_id)
+                self._logger.log_response(url, resp.status, body, resp_headers, self._session_id)
 
             if resp.status >= 400:
                 raise HTTPError(resp.status, resp.reason or "Request failed", body, url)
@@ -115,10 +116,11 @@ class HTTPClient:
         session = await self._get_session()
         async with session.get(url, headers=headers or {}) as resp:
             body = await resp.text()
+            resp_headers = dict(resp.headers)
 
             # Log response
             if self._logger:
-                self._logger.log_response(url, resp.status, body, self._session_id)
+                self._logger.log_response(url, resp.status, body, resp_headers, self._session_id)
 
             if resp.status >= 400:
                 raise HTTPError(resp.status, resp.reason or "Request failed", body, url)
@@ -152,9 +154,10 @@ class HTTPClient:
         async with session.post(url, json=data, headers=headers) as resp:
             if resp.status >= 400:
                 body = await resp.text()
+                resp_headers = dict(resp.headers)
                 # Log error response
                 if self._logger:
-                    self._logger.log_response(url, resp.status, body, self._session_id)
+                    self._logger.log_response(url, resp.status, body, resp_headers, self._session_id)
                 raise HTTPError(resp.status, resp.reason or "Request failed", body, url)
 
             # Read line by line for SSE
@@ -205,9 +208,10 @@ class HTTPClient:
         async with session.post(url, json=data, headers=headers) as resp:
             if resp.status >= 400:
                 body = await resp.text()
+                resp_headers = dict(resp.headers)
                 # Log error response
                 if self._logger:
-                    self._logger.log_response(url, resp.status, body, self._session_id)
+                    self._logger.log_response(url, resp.status, body, resp_headers, self._session_id)
                 raise HTTPError(resp.status, resp.reason or "Request failed", body, url)
 
             buffer = ""
@@ -270,10 +274,11 @@ class HTTPClient:
         session = await self._get_session()
         async with session.post(url, data=data, headers=headers) as resp:
             body = await resp.text()
+            resp_headers = dict(resp.headers)
 
             # Log response
             if self._logger:
-                self._logger.log_response(url, resp.status, body, self._session_id)
+                self._logger.log_response(url, resp.status, body, resp_headers, self._session_id)
 
             if resp.status >= 400:
                 raise HTTPError(resp.status, resp.reason or "Request failed", body, url)
