@@ -98,7 +98,7 @@ def encode_image_to_base64(image_path: Path) -> tuple[str, str]:
 
 def find_image_file() -> Path | None:
     """Find an image file in the examples directory."""
-    examples_dir = Path("examples")
+    examples_dir = Path(__file__).parent.parent
     for ext in [".jpg", ".jpeg", ".png", ".gif", ".webp"]:
         path = examples_dir / f"test_image{ext}"
         if path.exists():
@@ -141,9 +141,10 @@ async def main() -> None:
     console.print(f"[dim]Using image: {image_path}[/dim]")
     base64_data, media_type = encode_image_to_base64(image_path)
 
-    session_manager = SessionManager(Path("sessions_image.db"))
+    examples_dir = Path(__file__).parent.parent
+    session_manager = SessionManager(examples_dir / "sessions.db")
     session_id = f"image-session-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
-    log_file = Path("logs") / f"{session_id}.txt"
+    log_file = examples_dir / "logs" / f"{session_id}.txt"
 
     agent = Agent(
         provider=provider,

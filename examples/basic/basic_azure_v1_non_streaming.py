@@ -1,8 +1,7 @@
 """
-Example demonstrating the nagents module with all event types.
+Example demonstrating non-streaming usage with Azure OpenAI V1 API.
 
-This example shows how to use the Agent class with streaming events,
-tool execution, HTTP traffic logging, and comprehensive event handling.
+This example shows chain-of-thought reasoning content from models like Kimi-K2.5.
 """
 
 import asyncio
@@ -24,8 +23,8 @@ from nagents import DoneEvent
 from nagents import ErrorEvent
 from nagents import Provider
 from nagents import ProviderType
+from nagents import ReasoningChunkEvent
 from nagents import SessionManager
-from nagents import TextChunkEvent
 from nagents import TextDoneEvent
 from nagents import ToolCallEvent
 from nagents import ToolResultEvent
@@ -38,80 +37,105 @@ console = Console()
 
 async def order_coffee(quantity: int, store: str) -> str:
     """Simulate ordering a coffee."""
-    await asyncio.sleep(1)  # Simulate some delay
+    await asyncio.sleep(1)
     return f"Ordered {quantity} coffee(s) from {store}."
 
 
 def get_time(tz: str = "UTC") -> str:
     """Get the current time in a specific timezone."""
-    # Simplified - just return UTC time with timezone label
     now = datetime.now(UTC)
     return f"Current time in {tz}: {now.strftime('%Y-%m-%d %H:%M:%S')}"
 
 
-async def main() -> None:
-    """Main example demonstrating all event types."""
-    console.print(Panel.fit("[bold blue]nagents Example[/bold blue]"))
+def get_azure_provider() -> Provider:
+    """Create a Provider configured for Azure OpenAI V1 API."""
+    endpoint = os.getenv("AZURE_DEPLOYED_MODEL_ENDPOINT")
+    api_key = os.getenv("AZURE_DEPLOYED_MODEL_KEY")  # API key
+    model_name = os.getenv("AZURE_DEPLOYED_MODEL_NAME")  # Model/deployment name
 
-    api_key = os.getenv("OPENAI_API_KEY", "")
-    console.print("[dim]Using OpenAI provider[/dim]")
-    provider = Provider(
-        provider_type=ProviderType.OPENAI_COMPATIBLE,
+    if not endpoint:
+        raise ValueError("AZURE_DEPLOYED_MODEL_ENDPOINT not set. Please set it in your .env file.")
+    if not api_key:
+        raise ValueError("AZURE_DEPLOYED_MODEL_KEY (API key) not set. Please set it in your .env file.")
+    if not model_name:
+        raise ValueError("AZURE_DEPLOYED_MODEL_NAME (model name) not set. Please set it in your .env file.")
+
+    base_url = f"{endpoint.rstrip('/')}/openai"
+
+    console.print(f"[dim]Azure V1 endpoint: {base_url}[/dim]")
+    console.print(f"[dim]Model: {model_name}[/dim]")
+
+    return Provider(
+        provider_type=ProviderType.AZURE_OPENAI_COMPATIBLE_V1,
         api_key=api_key,
-        model="gpt-4o-mini",
+        model=model_name,
+        base_url=base_url,
     )
 
-    # Create session manager
-    session_manager = SessionManager(Path("sessions.db"))
 
-    # Use a unique session ID for this run
-    session_id = f"session-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
+async def main() -> None:
+    """Main example demonstrating non-streaming Azure OpenAI V1."""
+    console.print(Panel.fit("[bold blue]nagents Azure V1 Non-Streaming Example[/bold blue]"))
 
-    # Log file path: logs/<session_id>.txt
-    log_file = Path("logs") / f"{session_id}.txt"
+    try:
+        provider = get_azure_provider()
+    except ValueError as e:
+        console.print(f"[bold red]Configuration Error:[/bold red] {e}")
+        console.print("\n[yellow]Please ensure your .env file contains:[/yellow]")
+        console.print("  AZURE_DEPLOYED_MODEL_ENDPOINT=https://your-resource.cognitiveservices.azure.com")
+        console.print("  AZURE_DEPLOYED_MODEL_KEY=your-api-key")
+        console.print("  AZURE_DEPLOYED_MODEL_NAME=your-deployment-name")
+        return
 
-    # Create agent with tools and HTTP logging enabled
+    console.print("[dim]Using Azure OpenAI V1 provider (non-streaming)[/dim]")
+
+    examples_dir = Path(__file__).parent.parent
+    session_manager = SessionManager(examples_dir / "sessions.db")
+    session_id = f"azure-v1-nonstream-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
+    log_file = examples_dir / "logs" / f"{session_id}.txt"
+
     agent = Agent(
         provider=provider,
         session_manager=session_manager,
         tools=[order_coffee, get_time],
         system_prompt="You are a helpful assistant with access to coffee ordering and time tools. "
         "Use them when appropriate to answer user questions.",
-        streaming=True,  # Enable streaming to see TextChunkEvents
-        log_file=log_file,  # Enable HTTP/SSE logging
+        streaming=False,
+        log_file=log_file,
     )
 
     try:
-        # You can call agent.initialize() explicitly to catch errors early: but it is also auto ran on first turn.
         await agent.initialize()
         console.print(f"[green]Agent initialized, model: {provider.model}[/green]")
         console.print(f"[blue]HTTP logging to: {log_file}[/blue]")
 
-        # Example prompts that will trigger different behaviors
-        query = "Hey, what time it is, can you order 2 coffees for me from local shop? can you also calculate 123*456 for me?"
-
+        query = "Hey, what time is it? Can you order 2 coffees for me from the local shop?"
         console.print(Panel(f"[bold]User:[/bold] {query}", border_style="green"))
         console.print()
+
+        reasoning_text = ""
         response_text = ""
 
-        async for event in agent.run(
-            user_message=query,
-            session_id=session_id,
-            user_id="example-user",
-        ):
-            # Handle each event type
-            if isinstance(event, TextChunkEvent):
-                # Streaming text chunk - print without newline
-                console.print(event.chunk, end="")
-                response_text += event.chunk
+        async for event in agent.run(user_message=query, session_id=session_id):
+            if isinstance(event, ReasoningChunkEvent):
+                reasoning_text += event.chunk
+                console.print(
+                    Panel(
+                        event.chunk,
+                        title="[dim italic]Reasoning[/dim italic]",
+                        border_style="dim yellow",
+                    )
+                )
             elif isinstance(event, TextDoneEvent):
-                # Complete text received (may be emitted instead of chunks for non-streaming)
-                if not response_text:  # Only use if we didn't get chunks
-                    response_text = event.text
-                    console.print(event.text)
+                response_text = event.text
+                console.print(
+                    Panel(
+                        event.text,
+                        title="[bold blue]Response[/bold blue]",
+                        border_style="blue",
+                    )
+                )
             elif isinstance(event, ToolCallEvent):
-                # Model is calling a tool
-                console.print()
                 tool_text = Text()
                 tool_text.append("Tool Call: ", style="bold yellow")
                 tool_text.append(event.name, style="cyan")
@@ -121,7 +145,6 @@ async def main() -> None:
                 tool_text.append(")", style="dim")
                 console.print(tool_text)
             elif isinstance(event, ToolResultEvent):
-                # Tool execution completed
                 result_text = Text()
                 result_text.append("Tool call result: ", style="bold green")
                 result_text.append(f"`{event.name}` ", style="cyan")
@@ -132,27 +155,14 @@ async def main() -> None:
                 result_text.append(f" ({event.duration_ms:.1f}ms)", style="dim")
                 console.print(result_text)
             elif isinstance(event, ErrorEvent):
-                # Error occurred
-                console.print()
                 error_text = Text()
                 error_text.append("ERROR: ", style="bold red")
                 error_text.append(event.message, style="red")
                 if event.code:
                     error_text.append(f" (code: {event.code})", style="dim red")
-                if event.recoverable:
-                    error_text.append(" [recoverable]", style="yellow")
                 console.print(error_text)
             elif isinstance(event, DoneEvent):
-                # Generation complete - includes session_id and usage for reference
                 console.print()
-                done_text = Text()
-                done_text.append("Generation complete", style="bold green")
-                done_text.append(" - ", style="dim")
-                done_text.append(f"{len(event.final_text)} chars", style="dim")
-                if event.session_id:
-                    done_text.append(f" (session: {event.session_id})", style="dim blue")
-                console.print(done_text)
-                # Print usage statistics from the DoneEvent (usage is always present)
                 usage_text = Text()
                 usage_text.append("Usage: ", style="bold blue")
                 usage_text.append(
@@ -161,20 +171,17 @@ async def main() -> None:
                     f"total={event.usage.total_tokens}",
                     style="dim",
                 )
-                if event.usage.session:
-                    usage_text.append(
-                        f" | Session total: {event.usage.session.total_tokens}",
-                        style="dim cyan",
-                    )
                 console.print(usage_text)
-        console.print()
+                console.print(f"[dim]HTTP traffic logged to: {log_file.absolute()}[/dim]")
 
-        # Show where the log file is
-        console.print(f"[dim]HTTP traffic logged to: {log_file.absolute()}[/dim]")
+        console.print()
+        console.print(f"[dim]Reasoning length: {len(reasoning_text)} chars[/dim]")
+        console.print(f"[dim]Response length: {len(response_text)} chars[/dim]")
+
     finally:
-        # Always close to release resources
         await agent.close()
-    console.print("\n[dim]Example complete.[/dim]")
+
+    console.print("\n[dim]Azure V1 non-streaming example complete.[/dim]")
 
 
 if __name__ == "__main__":

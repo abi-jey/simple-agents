@@ -125,7 +125,14 @@ from .events import ToolResultType
 from .events import Usage
 from .exceptions import NagentsError
 from .exceptions import ToolHallucinationError
-from .http import FileHTTPLogger
+from .logger import FileTrafficLogger
+from .logger import TrafficLogger
+from .mcp import MCPError
+from .mcp import MCPSession
+from .mcp import MCPTimeoutError
+from .mcp import MCPTransportError
+from .mcp import StdioServerParameters
+from .mcp import StdioTransport
 from .media import AUDIO_MIME_TYPES
 from .media import DOCUMENT_MIME_TYPES
 from .media import IMAGE_MIME_TYPES
@@ -180,7 +187,7 @@ __all__ = [
     "ErrorEvent",
     "Event",
     "EventType",
-    "FileHTTPLogger",
+    "FileTrafficLogger",
     "FinishReason",
     "GeminiSTTService",
     "GeminiThinkingConfig",
@@ -189,6 +196,10 @@ __all__ = [
     "JsonSchema",
     "JsonSchemaProperty",
     "JsonValue",
+    "MCPError",
+    "MCPSession",
+    "MCPTimeoutError",
+    "MCPTransportError",
     "MediaCapabilities",
     "Message",
     "NagentsError",
@@ -198,6 +209,8 @@ __all__ = [
     "ReasoningChunkEvent",
     "STTService",
     "SessionManager",
+    "StdioServerParameters",
+    "StdioTransport",
     "TextChunkEvent",
     "TextContent",
     "TextDoneEvent",
@@ -212,6 +225,7 @@ __all__ = [
     "ToolRegistry",
     "ToolResultEvent",
     "ToolResultType",
+    "TrafficLogger",
     "TranscriptionResult",
     "UnsupportedAudioBehavior",
     "UnsupportedAudioError",

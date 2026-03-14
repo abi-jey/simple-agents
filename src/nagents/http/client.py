@@ -11,7 +11,7 @@ from typing import cast
 import aiohttp
 
 if TYPE_CHECKING:
-    from .logger import HTTPLogger
+    from ..logger import FileTrafficLogger
 
 
 class HTTPError(Exception):
@@ -33,7 +33,7 @@ class HTTPClient:
     def __init__(
         self,
         timeout: float = 120.0,
-        logger: "HTTPLogger | None" = None,
+        logger: "FileTrafficLogger | None" = None,
     ):
         self._timeout = aiohttp.ClientTimeout(total=timeout)
         self._session: aiohttp.ClientSession | None = None
@@ -44,7 +44,7 @@ class HTTPClient:
         """Set the current session ID for logging."""
         self._session_id = session_id
 
-    def set_logger(self, logger: "HTTPLogger | None") -> None:
+    def set_logger(self, logger: "FileTrafficLogger | None") -> None:
         """Set the HTTP logger."""
         self._logger = logger
 
@@ -76,7 +76,7 @@ class HTTPClient:
         """
         # Log request
         if self._logger:
-            self._logger.log_request("POST", url, headers, data, self._session_id)
+            self._logger.log_http_request("POST", url, headers, data, self._session_id)
 
         session = await self._get_session()
         async with session.post(url, json=data, headers=headers) as resp:
@@ -84,7 +84,7 @@ class HTTPClient:
 
             # Log response
             if self._logger:
-                self._logger.log_response(url, resp.status, body, self._session_id)
+                self._logger.log_http_response(url, resp.status, body, self._session_id)
 
             if resp.status >= 400:
                 raise HTTPError(resp.status, resp.reason or "Request failed", body, url)
@@ -110,7 +110,7 @@ class HTTPClient:
         """
         # Log request
         if self._logger:
-            self._logger.log_request("GET", url, headers or {}, None, self._session_id)
+            self._logger.log_http_request("GET", url, headers or {}, None, self._session_id)
 
         session = await self._get_session()
         async with session.get(url, headers=headers or {}) as resp:
@@ -118,7 +118,7 @@ class HTTPClient:
 
             # Log response
             if self._logger:
-                self._logger.log_response(url, resp.status, body, self._session_id)
+                self._logger.log_http_response(url, resp.status, body, self._session_id)
 
             if resp.status >= 400:
                 raise HTTPError(resp.status, resp.reason or "Request failed", body, url)
@@ -146,7 +146,7 @@ class HTTPClient:
         """
         # Log request
         if self._logger:
-            self._logger.log_request("POST", url, headers, data, self._session_id)
+            self._logger.log_http_request("POST", url, headers, data, self._session_id)
 
         session = await self._get_session()
         async with session.post(url, json=data, headers=headers) as resp:
@@ -154,7 +154,7 @@ class HTTPClient:
                 body = await resp.text()
                 # Log error response
                 if self._logger:
-                    self._logger.log_response(url, resp.status, body, self._session_id)
+                    self._logger.log_http_response(url, resp.status, body, self._session_id)
                 raise HTTPError(resp.status, resp.reason or "Request failed", body, url)
 
             # Read line by line for SSE
@@ -166,14 +166,14 @@ class HTTPClient:
                     chunk_data = decoded[6:]  # Remove "data: " prefix
                     # Log SSE chunk
                     if self._logger:
-                        self._logger.log_sse_chunk(url, chunk_data, self._session_id)
+                        self._logger.log_http_sse_chunk(url, chunk_data, self._session_id)
                     yield chunk_data
                 # Some APIs use just "data:" without space
                 elif decoded.startswith("data:"):
                     chunk_data = decoded[5:]
                     # Log SSE chunk
                     if self._logger:
-                        self._logger.log_sse_chunk(url, chunk_data, self._session_id)
+                        self._logger.log_http_sse_chunk(url, chunk_data, self._session_id)
                     yield chunk_data
 
     async def post_stream_ndjson(
@@ -199,7 +199,7 @@ class HTTPClient:
         """
         # Log request
         if self._logger:
-            self._logger.log_request("POST", url, headers, data, self._session_id)
+            self._logger.log_http_request("POST", url, headers, data, self._session_id)
 
         session = await self._get_session()
         async with session.post(url, json=data, headers=headers) as resp:
@@ -207,7 +207,7 @@ class HTTPClient:
                 body = await resp.text()
                 # Log error response
                 if self._logger:
-                    self._logger.log_response(url, resp.status, body, self._session_id)
+                    self._logger.log_http_response(url, resp.status, body, self._session_id)
                 raise HTTPError(resp.status, resp.reason or "Request failed", body, url)
 
             buffer = ""
@@ -223,7 +223,7 @@ class HTTPClient:
                         obj, idx = json.JSONDecoder().raw_decode(buffer)
                         # Log SSE chunk (NDJSON object)
                         if self._logger:
-                            self._logger.log_sse_chunk(url, json.dumps(obj), self._session_id)
+                            self._logger.log_http_sse_chunk(url, json.dumps(obj), self._session_id)
                         yield obj
                         buffer = buffer[idx:]
                     except json.JSONDecodeError:
@@ -265,7 +265,7 @@ class HTTPClient:
             log_fields = {
                 k: v if isinstance(v, str) else f"<file: {v[0]}, {len(v[1])} bytes>" for k, v in fields.items()
             }
-            self._logger.log_request("POST", url, headers, {"multipart": log_fields}, self._session_id)
+            self._logger.log_http_request("POST", url, headers, {"multipart": log_fields}, self._session_id)
 
         session = await self._get_session()
         async with session.post(url, data=data, headers=headers) as resp:
@@ -273,7 +273,7 @@ class HTTPClient:
 
             # Log response
             if self._logger:
-                self._logger.log_response(url, resp.status, body, self._session_id)
+                self._logger.log_http_response(url, resp.status, body, self._session_id)
 
             if resp.status >= 400:
                 raise HTTPError(resp.status, resp.reason or "Request failed", body, url)

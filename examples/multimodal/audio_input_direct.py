@@ -91,7 +91,7 @@ def get_azure_provider() -> Provider:
 
 def find_audio_file() -> Path | None:
     """Find an audio file in the examples directory."""
-    examples_dir = Path("examples")
+    examples_dir = Path(__file__).parent.parent
     for ext in [".wav", ".mp3"]:
         path = examples_dir / f"test_audio{ext}"
         if path.exists():
@@ -155,9 +155,10 @@ async def main() -> None:
         console.print(f"[red]Unsupported format: {format}. Use WAV or MP3.[/red]")
         return
 
-    session_manager = SessionManager(Path("sessions_audio_direct.db"))
+    examples_dir = Path(__file__).parent.parent
+    session_manager = SessionManager(examples_dir / "sessions.db")
     session_id = f"audio-direct-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
-    log_file = Path("logs") / f"{session_id}.txt"
+    log_file = examples_dir / "logs" / f"{session_id}.txt"
 
     agent = Agent(
         provider=provider,

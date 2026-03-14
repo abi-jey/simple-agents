@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 from nagents import Agent
 from nagents import DoneEvent
 from nagents import ErrorEvent
-from nagents import FileHTTPLogger
+from nagents import FileTrafficLogger
 from nagents import GenerationConfig
 from nagents import Message
 from nagents import Provider
@@ -275,17 +275,17 @@ class TestAgent:
             )
             # Check that log file and parent dirs were created
             assert log_path.exists()
-            assert agent._http_logger is not None
+            assert agent._traffic_logger is not None
 
 
 class TestHTTPLogger:
     """Test HTTP logging functionality."""
 
     def test_file_logger_creates_dirs(self) -> None:
-        """Test that FileHTTPLogger creates parent directories."""
+        """Test that FileTrafficLogger creates parent directories."""
         with TemporaryDirectory() as tmpdir:
             log_path = Path(tmpdir) / "nested" / "dirs" / "http.log"
-            FileHTTPLogger(log_path)  # Creates dirs on init
+            FileTrafficLogger(log_path)  # Creates dirs on init
             assert log_path.exists()
             assert log_path.parent.exists()
 
@@ -293,9 +293,9 @@ class TestHTTPLogger:
         """Test logging an HTTP request."""
         with TemporaryDirectory() as tmpdir:
             log_path = Path(tmpdir) / "http.log"
-            logger = FileHTTPLogger(log_path)
+            logger = FileTrafficLogger(log_path)
 
-            logger.log_request(
+            logger.log_http_request(
                 method="POST",
                 url="https://api.example.com/v1/chat",
                 headers={"Authorization": "Bearer sk-1234567890abcdef", "Content-Type": "application/json"},
@@ -317,9 +317,9 @@ class TestHTTPLogger:
         """Test logging an HTTP response."""
         with TemporaryDirectory() as tmpdir:
             log_path = Path(tmpdir) / "http.log"
-            logger = FileHTTPLogger(log_path)
+            logger = FileTrafficLogger(log_path)
 
-            logger.log_response(
+            logger.log_http_response(
                 url="https://api.example.com/v1/chat",
                 status=200,
                 body={"choices": [{"message": {"content": "Hello!"}}]},
@@ -336,9 +336,9 @@ class TestHTTPLogger:
         """Test logging an SSE chunk."""
         with TemporaryDirectory() as tmpdir:
             log_path = Path(tmpdir) / "http.log"
-            logger = FileHTTPLogger(log_path)
+            logger = FileTrafficLogger(log_path)
 
-            logger.log_sse_chunk(
+            logger.log_http_sse_chunk(
                 url="https://api.example.com/v1/chat",
                 data='{"choices": [{"delta": {"content": "Hi"}}]}',
                 session_id="test-session-123",
@@ -350,12 +350,12 @@ class TestHTTPLogger:
             assert "Hi" in content
 
     def test_file_logger_no_session_id(self) -> None:
-        """Test logging without a session ID uses 'no-session'."""
+        """Test logging without a session ID uses 'http' as source."""
         with TemporaryDirectory() as tmpdir:
             log_path = Path(tmpdir) / "http.log"
-            logger = FileHTTPLogger(log_path)
+            logger = FileTrafficLogger(log_path)
 
-            logger.log_request(
+            logger.log_http_request(
                 method="GET",
                 url="https://api.example.com/models",
                 headers={},
@@ -363,4 +363,4 @@ class TestHTTPLogger:
             )
 
             content = log_path.read_text()
-            assert "[no-session]" in content
+            assert "[http]" in content

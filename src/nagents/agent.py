@@ -2,6 +2,7 @@
 Main orchestrator for LLM interactions with auto tool execution.
 """
 
+import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -25,8 +26,10 @@ from .events import TokenUsage
 from .events import ToolCallEvent
 from .events import Usage
 from .exceptions import ToolHallucinationError
-from .http import FileHTTPLogger
 from .http import HTTPError
+from .logger import FileTrafficLogger
+from .mcp import MCPSession
+from .mcp import StdioServerParameters
 from .media import transcode_audio_to_wav
 from .provider import Provider
 from .provider import ProviderType
@@ -36,6 +39,7 @@ from .tools import ToolRegistry
 from .types import AudioContent
 from .types import ContentPart
 from .types import GenerationConfig
+from .types import JsonSchema
 from .types import Message
 from .types import TextContent
 from .types import ToolCall
@@ -126,6 +130,27 @@ class Agent:
         async for event in agent.run("Hello!"):
             # Events are yielded after batch completes
             ...
+
+    MCP Mode:
+        Connect to external MCP (Model Context Protocol) servers to provide
+        additional tools to the LLM. MCP tools are auto-discovered on
+        ``initialize()`` and prefixed with ``mcp_{server}_{tool}``:
+
+        agent = Agent(
+            provider=provider,
+            session_manager=session,
+            mcp_servers={
+                "playwright": StdioServerParameters(
+                    command="npx",
+                    args=["-y", "@playwright/mcp@latest"],
+                ),
+            },
+        )
+
+        async for event in agent.run("Browse example.com"):
+            ...
+
+        await agent.close()  # Also closes MCP server subprocesses
     """
 
     def __init__(
@@ -142,6 +167,7 @@ class Agent:
         batch_poll_interval: float = 30.0,
         stt_service: "STTService | None" = None,
         unsupported_audio: UnsupportedAudioBehavior = UnsupportedAudioBehavior.RAISE,
+        mcp_servers: dict[str, StdioServerParameters] | None = None,
     ):
         """
         Initialize the agent.
@@ -171,6 +197,17 @@ class Agent:
                                - DROP: Replace audio with a text warning
                                - TRANSCRIBE: Auto-transcribe using stt_service
                                  (requires stt_service to be set)
+            mcp_servers: Optional dict mapping server names to their connection
+                          parameters. MCP servers are connected during initialize()
+                          and their tools are discovered and prefixed as
+                          ``mcp_{server}_{tool}``. Example::
+
+                              mcp_servers={
+                                  "playwright": StdioServerParameters(
+                                      command="npx",
+                                      args=["-y", "@playwright/mcp@latest"],
+                                  ),
+                              }
         """
         self.provider = provider
         self.session = session_manager
@@ -194,15 +231,20 @@ class Agent:
         self.tool_executor = ToolExecutor(self.tool_registry)
 
         self._initialized = False
-        self._http_logger: FileHTTPLogger | None = None
+        self._traffic_logger: FileTrafficLogger | None = None
         self._batch_client: BatchClient | None = None
 
-        # Set up HTTP logging if log_file is provided
+        # MCP state
+        self._mcp_server_params: dict[str, StdioServerParameters] = mcp_servers or {}
+        self._mcp_sessions: dict[str, MCPSession] = {}
+        self._mcp_tools: list[ToolDefinition] = []
+
+        # Set up unified traffic logging (HTTP + MCP + subprocess I/O)
         if log_file:
             log_path = Path(log_file) if isinstance(log_file, str) else log_file
-            self._http_logger = FileHTTPLogger(log_path)
-            self.provider.set_http_logger(self._http_logger)
-            logger.info(f"HTTP logging enabled: {log_path}")
+            self._traffic_logger = FileTrafficLogger(log_path)
+            self.provider.set_http_logger(self._traffic_logger)
+            logger.info(f"Traffic logging enabled: {log_path}")
 
         if tools:
             for tool in tools:
@@ -230,7 +272,7 @@ class Agent:
             api_key=self.provider.api_key,
             model=self.provider.model,
             base_url=self.provider.base_url,
-            logger=self._http_logger,
+            logger=self._traffic_logger,
         )
         logger.info("Batch mode enabled - requests will be processed with 50% cost discount")
 
@@ -246,12 +288,14 @@ class Agent:
         This method:
         1. Initializes the session manager database
         2. Verifies the model exists with the provider
+        3. Connects to configured MCP servers and discovers their tools
 
         You can call this manually to catch initialization errors early,
         otherwise it's called automatically on the first run().
 
         Raises:
             ValueError: If model verification fails
+            MCPTransportError: If an MCP server fails to connect
         """
         if self._initialized:
             logger.debug("Agent already initialized")
@@ -268,6 +312,9 @@ class Agent:
             )
         logger.debug(f"Model verified: {self.provider.model}")
 
+        # Connect to MCP servers and discover tools
+        await self._connect_mcp_servers()
+
         self._initialized = True
         logger.info("Agent initialized successfully")
 
@@ -275,6 +322,157 @@ class Agent:
         """Ensure agent is initialized, auto-initialize if not."""
         if not self._initialized:
             await self.initialize()
+
+    # ---- MCP integration ----
+
+    async def _connect_mcp_servers(self) -> None:
+        """
+        Connect to all configured MCP servers and discover their tools.
+
+        Called during ``initialize()``. Each server is connected via stdio
+        transport, its tools are fetched and converted to ``ToolDefinition``
+        objects with the naming scheme ``mcp_{server}_{tool}``.
+
+        Raises:
+            MCPTransportError: If a server fails to connect
+            MCPError: If protocol initialization fails
+        """
+        if not self._mcp_server_params:
+            return
+
+        for server_name, params in self._mcp_server_params.items():
+            logger.info(f"Connecting to MCP server: {server_name}")
+
+            session = MCPSession()
+            session._transport.set_server_name(server_name)
+            if self._traffic_logger:
+                session._transport.set_logger(self._traffic_logger)
+
+            init_result = await session.connect(params)
+
+            server_info = init_result.get("serverInfo", {})
+            srv_name = server_info.get("name", "unknown") if server_info else "unknown"
+            srv_version = server_info.get("version", "?") if server_info else "?"
+            protocol = init_result.get("protocolVersion", "?")
+            logger.info(f"MCP server connected: {srv_name} v{srv_version} (protocol: {protocol})")
+
+            self._mcp_sessions[server_name] = session
+
+        # Discover tools from all connected servers
+        await self._discover_mcp_tools()
+
+    async def _discover_mcp_tools(self) -> None:
+        """
+        Fetch tools from all connected MCP servers and convert them to
+        ``ToolDefinition`` objects.
+
+        Tools are prefixed with ``mcp_{server}_{tool}`` to avoid collisions
+        with native tools. Each tool gets an async handler that routes calls
+        back to the originating MCP session.
+        """
+        self._mcp_tools.clear()
+
+        for server_name, session in self._mcp_sessions.items():
+            tools_result = await session.list_tools()
+            raw_tools: list[dict[str, Any]] = tools_result.get("tools", [])
+            logger.info(f"MCP server '{server_name}': discovered {len(raw_tools)} tools")
+
+            for tool in raw_tools:
+                tool_def = self._mcp_tool_to_definition(tool, session, server_name)
+                self._mcp_tools.append(tool_def)
+                # Also register in tool_registry so ToolExecutor can find them
+                self.tool_registry._tools[tool_def.name] = tool_def
+
+            logger.debug(f"MCP tools from '{server_name}': {[t.get('name', '?') for t in raw_tools]}")
+
+    def _mcp_tool_to_definition(
+        self,
+        tool: dict[str, Any],
+        session: MCPSession,
+        server_name: str,
+    ) -> ToolDefinition:
+        """
+        Convert an MCP tool dict to a nagents ``ToolDefinition``.
+
+        Args:
+            tool: MCP tool definition from ``tools/list``
+            session: Connected MCP session for building the handler
+            server_name: Server name used for the ``mcp_{server}_`` prefix
+
+        Returns:
+            ``ToolDefinition`` with an async handler that calls the MCP server
+        """
+        original_name: str = tool.get("name", "unknown")
+        prefixed_name = f"mcp_{server_name}_{original_name}"
+        description: str = tool.get("description", f"MCP tool: {original_name}")
+
+        # Convert MCP inputSchema to nagents JsonSchema
+        input_schema = tool.get("inputSchema", {})
+        parameters: JsonSchema = {
+            "type": input_schema.get("type", "object"),
+            "properties": input_schema.get("properties", {}),
+        }
+        required = input_schema.get("required")
+        if required:
+            parameters["required"] = required
+
+        handler = self._create_mcp_handler(session, original_name)
+
+        return ToolDefinition(
+            name=prefixed_name,
+            description=description,
+            parameters=parameters,
+            func=handler,
+        )
+
+    @staticmethod
+    def _create_mcp_handler(
+        session: MCPSession,
+        tool_name: str,
+    ) -> Callable[..., Any]:
+        """
+        Create an async callable that routes tool calls to the MCP session.
+
+        Args:
+            session: Connected MCP session
+            tool_name: Original tool name on the MCP server
+
+        Returns:
+            Async callable accepting ``**kwargs`` and returning the text
+            content from the MCP response.
+        """
+
+        async def handler(**kwargs: Any) -> str:
+            result = await session.call_tool(tool_name, kwargs if kwargs else None)
+            is_error = result.get("isError", False)
+            content_blocks: list[dict[str, Any]] = result.get("content", [])
+
+            texts: list[str] = []
+            for block in content_blocks:
+                if block.get("type") == "text":
+                    texts.append(block.get("text", ""))
+
+            response = "\n".join(texts) if texts else json.dumps(result)
+
+            if is_error:
+                raise RuntimeError(f"MCP tool error: {response}")
+
+            return response
+
+        return handler
+
+    async def _close_mcp_servers(self) -> None:
+        """Close all connected MCP sessions."""
+        for server_name, session in self._mcp_sessions.items():
+            try:
+                await session.close()
+                logger.info(f"MCP server closed: {server_name}")
+            except Exception:
+                logger.exception(f"Error closing MCP server: {server_name}")
+        self._mcp_sessions.clear()
+        self._mcp_tools.clear()
+
+    # ---- end MCP integration ----
 
     def register_tool(
         self,
@@ -1010,6 +1208,7 @@ class Agent:
 
     async def close(self) -> None:
         """Close the agent and release resources."""
+        await self._close_mcp_servers()
         await self.provider.close()
         if self._batch_client:
             await self._batch_client.close()

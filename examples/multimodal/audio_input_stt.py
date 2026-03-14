@@ -121,12 +121,15 @@ async def main() -> None:
     stt_service = get_gemini_stt()
     console.print("[green]STT service initialized (Gemini)[/green]")
 
+    # Paths relative to examples/ directory
+    examples_dir = Path(__file__).parent.parent
+
     # Create session manager
-    session_manager = SessionManager(Path("sessions_audio.db"))
+    session_manager = SessionManager(examples_dir / "sessions.db")
 
     # Create log file
     session_id = f"audio-session-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
-    log_file = Path("logs") / f"{session_id}.txt"
+    log_file = examples_dir / "logs" / f"{session_id}.txt"
 
     # Create agent with STT service
     agent = Agent(
@@ -139,7 +142,7 @@ async def main() -> None:
 
     # Demo audio file - you need to provide one
     # Telegram voice messages are typically .oga or .ogg format
-    audio_file_path = Path("examples/test_audio.ogg")
+    audio_file_path = examples_dir / "test_audio.ogg"
 
     if audio_file_path.exists():
         console.print(f"[dim]Using audio file: {audio_file_path}[/dim]")

@@ -125,14 +125,17 @@ async def main() -> None:
 
     console.print("[dim]Using Azure AI Services provider[/dim]")
 
+    # Paths relative to examples/ directory
+    examples_dir = Path(__file__).parent.parent
+
     # Create session manager
-    session_manager = SessionManager(Path("sessions_azure.db"))
+    session_manager = SessionManager(examples_dir / "sessions.db")
 
     # Use a unique session ID for this run
     session_id = f"azure-session-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
 
     # Log file path: logs/<session_id>.txt
-    log_file = Path("logs") / f"{session_id}.txt"
+    log_file = examples_dir / "logs" / f"{session_id}.txt"
 
     # Create agent with tools and HTTP logging enabled
     agent = Agent(

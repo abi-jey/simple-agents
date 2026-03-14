@@ -75,11 +75,12 @@ async def demo_recovery_mode() -> None:
         api_key=api_key,
         model="gpt-4o-mini",
     )
-    session_manager = SessionManager(Path("sessions.db"))
+    examples_dir = Path(__file__).parent.parent
+    session_manager = SessionManager(examples_dir / "sessions.db")
 
     # Use a unique session ID for this run
     session_id = f"hallucination-recovery-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
-    log_file = Path("logs") / f"{session_id}.txt"
+    log_file = examples_dir / "logs" / f"{session_id}.txt"
 
     agent = Agent(
         provider=provider,
@@ -151,11 +152,12 @@ async def demo_fail_mode() -> None:
         api_key=api_key,
         model="gpt-4o-mini",
     )
-    session_manager = SessionManager(Path("sessions.db"))
+    examples_dir = Path(__file__).parent.parent
+    session_manager = SessionManager(examples_dir / "sessions.db")
 
     # Use a unique session ID for this run
     session_id = f"hallucination-fail-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
-    log_file = Path("logs") / f"{session_id}.txt"
+    log_file = examples_dir / "logs" / f"{session_id}.txt"
 
     agent = Agent(
         provider=provider,

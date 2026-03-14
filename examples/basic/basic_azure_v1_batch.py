@@ -87,9 +87,10 @@ async def main() -> None:
         console.print(f"[bold red]Configuration Error:[/bold red] {e}")
         return
 
-    session_manager = SessionManager(Path("sessions_azure_v1_batch.db"))
+    examples_dir = Path(__file__).parent.parent
+    session_manager = SessionManager(examples_dir / "sessions.db")
     session_id = f"azure-v1-batch-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
-    log_file = Path("logs") / f"{session_id}.txt"
+    log_file = examples_dir / "logs" / f"{session_id}.txt"
 
     agent = Agent(
         provider=provider,

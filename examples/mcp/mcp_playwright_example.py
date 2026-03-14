@@ -1,24 +1,23 @@
 """
-Example demonstrating the nagents module with Azure OpenAI V1 API.
+MCP Playwright Example - Agent with MCP Browser Tools.
 
-This example shows how to use the Agent class with Azure-deployed models
-via the OpenAI-compatible V1 API endpoint with HTTP traffic logging.
+This example demonstrates the nagents Agent with MCP (Model Context Protocol)
+integration. The Agent connects to a Playwright MCP server, discovers its
+browser automation tools, and uses them to browse the web autonomously via
+the LLM.
 
-Azure OpenAI V1 Setup:
----------------------
-1. Create an Azure OpenAI resource in Azure Portal
-2. Deploy a model (e.g., GPT-4o, Kimi-K2.5, etc.)
-3. Get your endpoint URL and API key from the Azure Portal
-4. Set the following environment variables in your .env file:
+The flow is fully integrated:
+    1. Agent connects to Playwright MCP server during initialize()
+    2. MCP tools are auto-discovered and prefixed (mcp_playwright_*)
+    3. LLM calls browser tools as needed to fulfill the user query
+    4. Agent routes tool calls to the MCP server and feeds results back
 
-   AZURE_DEPLOYED_MODEL_ENDPOINT=https://your-resource.openai.azure.com
-   AZURE_DEPLOYED_MODEL_NAME=your-api-key
-   AZURE_DEPLOYED_MODEL_KEY=your-deployed-model-name
+Prerequisites:
+    - Install: pip install nagents python-dotenv rich
+    - Node.js and npx installed (for Playwright MCP server)
 
-The V1 API uses:
-- URL: https://{resource}.openai.azure.com/openai/v1/chat/completions
-- Auth: Authorization Bearer token
-- Model specified in request body (like standard OpenAI)
+Usage:
+    python mcp_playwright_example.py
 """
 
 import asyncio
@@ -42,6 +41,7 @@ from nagents import Provider
 from nagents import ProviderType
 from nagents import ReasoningChunkEvent
 from nagents import SessionManager
+from nagents import StdioServerParameters
 from nagents import TextChunkEvent
 from nagents import TextDoneEvent
 from nagents import ToolCallEvent
@@ -53,48 +53,19 @@ logger = getLogger(__name__)
 console = Console()
 
 
-async def order_coffee(quantity: int, store: str) -> str:
-    """Simulate ordering a coffee."""
-    await asyncio.sleep(1)  # Simulate some delay
-    return f"Ordered {quantity} coffee(s) from {store}."
-
-
-def get_time(tz: str = "UTC") -> str:
-    """Get the current time in a specific timezone."""
-    # Simplified - just return UTC time with timezone label
-    now = datetime.now(UTC)
-    return f"Current time in {tz}: {now.strftime('%Y-%m-%d %H:%M:%S')}"
-
-
 def get_azure_provider() -> Provider:
-    """
-    Create a Provider configured for Azure OpenAI V1 API.
-
-    The V1 API is OpenAI-compatible and uses:
-    - URL: https://{resource}.openai.azure.com/openai/v1/chat/completions
-    - Auth: Authorization Bearer token
-    - Model in request body
-
-    Returns:
-        Provider configured for Azure OpenAI V1 API
-
-    Raises:
-        ValueError: If required environment variables are not set
-    """
-    # Get Azure configuration from environment
+    """Create a Provider configured for Azure OpenAI V1 API."""
     endpoint = os.getenv("AZURE_DEPLOYED_MODEL_ENDPOINT")
-    api_key = os.getenv("AZURE_DEPLOYED_MODEL_KEY")  # API key
-    model_name = os.getenv("AZURE_DEPLOYED_MODEL_NAME")  # Model/deployment name
+    api_key = os.getenv("AZURE_DEPLOYED_MODEL_KEY")
+    model_name = os.getenv("AZURE_DEPLOYED_MODEL_NAME")
 
     if not endpoint:
         raise ValueError("AZURE_DEPLOYED_MODEL_ENDPOINT not set. Please set it in your .env file.")
     if not api_key:
-        raise ValueError("AZURE_DEPLOYED_MODEL_KEY (API key) not set. Please set it in your .env file.")
+        raise ValueError("AZURE_DEPLOYED_MODEL_KEY not set. Please set it in your .env file.")
     if not model_name:
-        raise ValueError("AZURE_DEPLOYED_MODEL_NAME (model name) not set. Please set it in your .env file.")
+        raise ValueError("AZURE_DEPLOYED_MODEL_NAME not set. Please set it in your .env file.")
 
-    # For V1 API, base_url should include /openai suffix
-    # URL format: https://{resource}.openai.azure.com/openai/v1/chat/completions
     base_url = f"{endpoint.rstrip('/')}/openai"
 
     console.print(f"[dim]Azure V1 endpoint: {base_url}[/dim]")
@@ -109,8 +80,8 @@ def get_azure_provider() -> Provider:
 
 
 async def main() -> None:
-    """Main example demonstrating Azure OpenAI V1 integration."""
-    console.print(Panel.fit("[bold blue]nagents Azure V1 Example[/bold blue]"))
+    """Run Agent with MCP Playwright integration."""
+    console.print(Panel.fit("[bold blue]nagents MCP Playwright Example[/bold blue]"))
 
     try:
         provider = get_azure_provider()
@@ -122,37 +93,56 @@ async def main() -> None:
         console.print("  AZURE_DEPLOYED_MODEL_NAME=your-deployment-name")
         return
 
-    console.print("[dim]Using Azure OpenAI V1 provider[/dim]")
+    # --- Session setup ---
+    examples_dir = Path(__file__).parent.parent
+    session_manager = SessionManager(examples_dir / "sessions.db")
+    session_id = f"mcp-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
 
-    # Create session manager
-    session_manager = SessionManager(Path("sessions_azure.db"))
+    # --- Log file path ---
+    log_file = examples_dir / "logs" / f"{session_id}.txt"
 
-    # Use a unique session ID for this run
-    session_id = f"azure-v1-session-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
+    # --- Create Agent with MCP server ---
+    config_path = Path(__file__).parent / "mcp_playwright_config.json"
 
-    # Log file path: logs/<session_id>.txt
-    log_file = Path("logs") / f"{session_id}.txt"
-
-    # Create agent with tools and HTTP logging enabled
     agent = Agent(
         provider=provider,
         session_manager=session_manager,
-        tools=[order_coffee, get_time],
-        system_prompt="You are a helpful assistant with access to coffee ordering and time tools. "
-        "Use them when appropriate to answer user questions.",
-        streaming=True,  # Enable streaming to see TextChunkEvents
-        log_file=log_file,  # Enable HTTP/SSE logging
+        system_prompt=(
+            "You are a helpful assistant with access to browser automation tools. "
+            "Use the browser tools to navigate websites, take snapshots, and extract information. "
+            "When browsing, always take a snapshot after navigating to see the page content. "
+            "Be concise in your final answer."
+        ),
+        streaming=True,
+        log_file=log_file,
+        max_tool_rounds=15,
+        mcp_servers={
+            "playwright": StdioServerParameters(
+                command="npx",
+                args=["-y", "@playwright/mcp@latest", "--browser=chrome", "--config", str(config_path)],
+                timeout=60.0,
+            ),
+        },
     )
 
     try:
-        # Initialize the agent
+        # Initialize explicitly to see MCP connection logs
+        console.print("\n[bold]Initializing agent (connecting to MCP servers)...[/bold]")
         await agent.initialize()
         console.print(f"[green]Agent initialized, model: {provider.model}[/green]")
-        console.print(f"[blue]HTTP logging to: {log_file}[/blue]")
+        console.print(f"[green]MCP tools registered: {len(agent.tool_registry.get_all())}[/green]")
+        console.print(f"[blue]Traffic log: {log_file}[/blue]")
 
-        # Example prompts that will trigger different behaviors
-        query = "Hey, what time is it? Can you order 2 coffees for me from the local shop?"
-
+        # --- Run with user query ---
+        query = (
+            "What are the latest news today? "
+            + "Ensure you accept cookies etc. "
+            + "Wait for 10s after opening a webpage to ensure all content is loaded, "
+            + "scroll very slowly downward the page to load all the content "
+            + "then give me a summary."
+            + "Check bbc.com and reuters.com are prefered sources for news. but head to x.com as well to catch a glance"
+        )
+        console.print()
         console.print(Panel(f"[bold]User:[/bold] {query}", border_style="green"))
         console.print()
         response_text = ""
@@ -160,46 +150,43 @@ async def main() -> None:
         async for event in agent.run(
             user_message=query,
             session_id=session_id,
-            user_id="azure-v1-example-user",
+            user_id="mcp-example-user",
         ):
-            # Handle each event type
             if isinstance(event, ReasoningChunkEvent):
-                # Streaming reasoning chunk (from chain-of-thought models)
-                # Display in a dim style to distinguish from regular content
-                console.print(f"[dim italic]{event.chunk}[/dim italic]", end="")
+                console.print(event.chunk, end="", style="dim italic")
             elif isinstance(event, TextChunkEvent):
-                # Streaming text chunk - print without newline
                 console.print(event.chunk, end="")
                 response_text += event.chunk
             elif isinstance(event, TextDoneEvent):
-                # Complete text received (may be emitted instead of chunks for non-streaming)
-                if not response_text:  # Only use if we didn't get chunks
+                if not response_text:
                     response_text = event.text
                     console.print(event.text)
             elif isinstance(event, ToolCallEvent):
-                # Model is calling a tool
                 console.print()
                 tool_text = Text()
                 tool_text.append("Tool Call: ", style="bold yellow")
                 tool_text.append(event.name, style="cyan")
                 tool_text.append("(", style="dim")
                 args_str = ", ".join(f"{k}={v!r}" for k, v in event.arguments.items())
+                if len(args_str) > 120:
+                    args_str = args_str[:120] + "..."
                 tool_text.append(args_str, style="white")
                 tool_text.append(")", style="dim")
                 console.print(tool_text)
             elif isinstance(event, ToolResultEvent):
-                # Tool execution completed
                 result_text = Text()
-                result_text.append("Tool call result: ", style="bold green")
+                result_text.append("Tool Result: ", style="bold green")
                 result_text.append(f"`{event.name}` ", style="cyan")
                 if event.error:
-                    result_text.append(f"ERROR: {event.error}", style="red")
+                    result_text.append(f"ERROR: {event.error[:100]}", style="red")
                 else:
-                    result_text.append(str(event.result), style="white")
+                    result_str = str(event.result) if event.result else ""
+                    if len(result_str) > 150:
+                        result_str = result_str[:150] + "..."
+                    result_text.append(result_str, style="white")
                 result_text.append(f" ({event.duration_ms:.1f}ms)", style="dim")
                 console.print(result_text)
             elif isinstance(event, ErrorEvent):
-                # Error occurred
                 console.print()
                 error_text = Text()
                 error_text.append("ERROR: ", style="bold red")
@@ -210,7 +197,6 @@ async def main() -> None:
                     error_text.append(" [recoverable]", style="yellow")
                 console.print(error_text)
             elif isinstance(event, DoneEvent):
-                # Generation complete - includes session_id and usage for reference
                 console.print()
                 done_text = Text()
                 done_text.append("Generation complete", style="bold green")
@@ -219,7 +205,7 @@ async def main() -> None:
                 if event.session_id:
                     done_text.append(f" (session: {event.session_id})", style="dim blue")
                 console.print(done_text)
-                # Print usage statistics from the DoneEvent (usage is always present)
+
                 usage_text = Text()
                 usage_text.append("Usage: ", style="bold blue")
                 usage_text.append(
@@ -234,14 +220,13 @@ async def main() -> None:
                         style="dim cyan",
                     )
                 console.print(usage_text)
-        console.print()
 
-        # Show where the log file is
-        console.print(f"[dim]HTTP traffic logged to: {log_file.absolute()}[/dim]")
+        console.print()
+        console.print(f"[dim]Traffic logged to: {log_file.absolute()}[/dim]")
     finally:
-        # Always close to release resources
         await agent.close()
-    console.print("\n[dim]Azure V1 example complete.[/dim]")
+
+    console.print("[dim]Example complete.[/dim]")
 
 
 if __name__ == "__main__":

@@ -105,7 +105,7 @@ def main() -> None:
     log("=" * 60, "bold blue")
     log("")
 
-    output_dir = Path("examples")
+    output_dir = Path(__file__).parent.parent
     output_dir.mkdir(parents=True, exist_ok=True)
 
     log("Creating image file...", "bold")

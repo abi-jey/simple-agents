@@ -1,0 +1,13 @@
+{
+  "browser": {
+    "launchOptions": {
+      "headless": false
+    },
+    "contextOptions": {
+      "recordVideo": {
+        "dir": "logs/videos",
+        "size": { "width": 1920, "height": 1080 }
+      }
+    }
+  }
+}

@@ -32,7 +32,7 @@ from ..types import ToolCall
 from ..types import ToolDefinition
 
 if TYPE_CHECKING:
-    from ..http import HTTPLogger
+    from ..logger import FileTrafficLogger
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ class Provider:
         if not self.api_key:
             raise ValueError("API key is required for provider initialization")
 
-    def set_http_logger(self, http_logger: "HTTPLogger | None") -> None:
+    def set_http_logger(self, http_logger: "FileTrafficLogger | None") -> None:
         """
         Set the HTTP logger for debugging/auditing.
 

@@ -75,13 +75,14 @@ async def main() -> None:
         model="gpt-4o-mini",
     )
 
-    session_manager = SessionManager(Path("sessions.db"))
+    examples_dir = Path(__file__).parent.parent
+    session_manager = SessionManager(examples_dir / "sessions.db")
 
     # Use a unique session ID for this run
     session_id = f"session-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
 
     # Log file path: logs/<session_id>.txt
-    log_file = Path("logs") / f"{session_id}.txt"
+    log_file = examples_dir / "logs" / f"{session_id}.txt"
 
     # Create agent with streaming=False (this is the default)
     agent = Agent(

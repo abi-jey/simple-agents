@@ -19,7 +19,7 @@ from typing import Any
 from typing import Literal
 
 if TYPE_CHECKING:
-    from ..http import HTTPLogger
+    from ..logger import FileTrafficLogger
 
 from ..events import FinishReason
 from ..http import HTTPClient
@@ -80,7 +80,7 @@ class BatchClient:
         model: str,
         base_url: str | None = None,
         timeout: float = 120.0,
-        logger: "HTTPLogger | None" = None,
+        logger: "FileTrafficLogger | None" = None,
     ):
         """
         Initialize the batch client.
@@ -132,12 +132,12 @@ class BatchClient:
     def _log_file_request(self, method: str, url: str, headers: dict[str, str], filename: str) -> None:
         """Log a file upload/download request."""
         if self._http._logger:
-            self._http._logger.log_request(method, url, headers, {"file": filename}, self._http._session_id)
+            self._http._logger.log_http_request(method, url, headers, {"file": filename}, self._http._session_id)
 
     def _log_file_response(self, url: str, status: int, body: str) -> None:
         """Log a file upload/download response."""
         if self._http._logger:
-            self._http._logger.log_response(url, status, body, self._http._session_id)
+            self._http._logger.log_http_response(url, status, body, self._http._session_id)
 
     def _get_headers(self, for_file_upload: bool = False) -> dict[str, str]:
         """Get headers for API requests."""
