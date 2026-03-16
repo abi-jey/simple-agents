@@ -146,6 +146,25 @@ class Message:
 
 
 @dataclass
+class RetryConfig:
+    """Configuration for automatic retry on rate limit (429) and server error (5xx) responses.
+
+    Retry is enabled by default. Set max_retries=0 to disable.
+
+    When respect_retry_after is True (default), the Retry-After header from the
+    server takes priority over exponential backoff for determining delay.
+
+    Exponential backoff formula: delay = min(base_delay * 2^attempt, max_delay)
+    Default progression: 5s, 10s, 20s (capped at max_delay).
+    """
+
+    max_retries: int = 3
+    base_delay: float = 5.0  # seconds
+    max_delay: float = 300.0  # 5 minutes cap
+    respect_retry_after: bool = True
+
+
+@dataclass
 class GenerationConfig:
     """Configuration for generation."""
 

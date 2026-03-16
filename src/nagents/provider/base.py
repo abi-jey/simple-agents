@@ -6,6 +6,7 @@ Supports:
 - Gemini Native REST API
 """
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -17,6 +18,7 @@ from ..adapters import openai as openai_adapter
 from ..events import ErrorEvent
 from ..events import Event
 from ..events import FinishReason
+from ..events import RateLimitEvent
 from ..events import ReasoningChunkEvent
 from ..events import TextChunkEvent
 from ..events import TextDoneEvent
@@ -28,6 +30,7 @@ from ..media import MediaCapabilities
 from ..media import get_media_capabilities
 from ..types import GenerationConfig
 from ..types import Message
+from ..types import RetryConfig
 from ..types import ToolCall
 from ..types import ToolDefinition
 
@@ -72,6 +75,7 @@ class Provider:
         base_url: str | None = None,
         timeout: float = 120.0,
         api_version: str | None = None,
+        retry_config: RetryConfig | None = None,
     ):
         """
         Initialize the provider.
@@ -84,11 +88,15 @@ class Provider:
                       For Azure OpenAI: https://{resource}.cognitiveservices.azure.com
             timeout: Request timeout in seconds
             api_version: API version (required for Azure OpenAI, e.g., "2024-05-01-preview")
+            retry_config: Retry configuration for rate limit and server error handling.
+                          Defaults to RetryConfig() (3 retries, 5s base delay).
+                          Set RetryConfig(max_retries=0) to disable retry.
         """
         self.provider_type = provider_type
         self.api_key = api_key
         self.model = model
         self.api_version = api_version
+        self.retry_config = retry_config or RetryConfig()
         self._http = HTTPClient(timeout=timeout)
         self._model_verified: bool | None = None  # None = not checked, True/False = result
 
@@ -282,27 +290,14 @@ class Provider:
                 return
 
         try:
-            if self.provider_type == ProviderType.OPENAI_COMPATIBLE:
-                async for event in self._generate_openai(messages, tools, config, stream):
-                    yield event
-            elif (
-                self.provider_type == ProviderType.AZURE_OPENAI_COMPATIBLE
-                or self.provider_type == ProviderType.AZURE_OPENAI_COMPATIBLE_V1
-            ):
-                async for event in self._generate_azure_openai(messages, tools, config, stream):
-                    yield event
-            elif self.provider_type == ProviderType.ANTHROPIC:
-                async for event in self._generate_anthropic(messages, tools, config, stream):
-                    yield event
-            else:
-                async for event in self._generate_gemini(messages, tools, config, stream):
-                    yield event
+            async for event in self._with_retry(messages, tools, config, stream):
+                yield event
         except HTTPError as e:
             logger.error(f"HTTP error during generation: {e}")
             yield ErrorEvent(
                 message=str(e),
                 code=str(e.status),
-                recoverable=e.status >= 500,
+                recoverable=e.is_retryable(),
             )
         except Exception as e:
             logger.exception("Unexpected error during generation")
@@ -310,6 +305,104 @@ class Provider:
                 message=str(e),
                 recoverable=False,
             )
+
+    async def _dispatch(
+        self,
+        messages: list[Message],
+        tools: list[ToolDefinition] | None,
+        config: GenerationConfig | None,
+        stream: bool,
+    ) -> AsyncIterator[Event]:
+        """Dispatch to the appropriate provider-specific generator."""
+        if self.provider_type == ProviderType.OPENAI_COMPATIBLE:
+            async for event in self._generate_openai(messages, tools, config, stream):
+                yield event
+        elif (
+            self.provider_type == ProviderType.AZURE_OPENAI_COMPATIBLE
+            or self.provider_type == ProviderType.AZURE_OPENAI_COMPATIBLE_V1
+        ):
+            async for event in self._generate_azure_openai(messages, tools, config, stream):
+                yield event
+        elif self.provider_type == ProviderType.ANTHROPIC:
+            async for event in self._generate_anthropic(messages, tools, config, stream):
+                yield event
+        else:
+            async for event in self._generate_gemini(messages, tools, config, stream):
+                yield event
+
+    async def _with_retry(
+        self,
+        messages: list[Message],
+        tools: list[ToolDefinition] | None,
+        config: GenerationConfig | None,
+        stream: bool,
+    ) -> AsyncIterator[Event]:
+        """Wrap dispatch with retry logic for rate limit and server errors.
+
+        On retryable errors (429, 5xx):
+        - Yields a RateLimitEvent so callers have visibility
+        - Logs a WARNING with retry details
+        - Sleeps for the calculated delay
+        - Retries the request
+
+        On retry exhaustion:
+        - Logs an ERROR
+        - Re-raises the HTTPError (caught by generate()'s outer handler)
+        """
+        max_retries = self.retry_config.max_retries
+
+        for attempt in range(max_retries + 1):
+            try:
+                async for event in self._dispatch(messages, tools, config, stream):
+                    yield event
+                return  # Success — exit retry loop
+            except HTTPError as e:
+                is_last_attempt = attempt >= max_retries
+                if not e.is_retryable() or is_last_attempt:
+                    if attempt > 0:
+                        logger.error(f"HTTP {e.status} failed after {attempt} retries: {e}")
+                    raise  # Re-raise to generate()'s outer except
+
+                delay = self._calculate_delay(e, attempt)
+                error_label = "RateLimitReached" if e.is_rate_limited() else "ServerError"
+
+                logger.warning(
+                    f"Retrying HTTP {e.status} in {delay}s (attempt {attempt + 1}/{max_retries}): {error_label}"
+                )
+
+                yield RateLimitEvent(
+                    attempt=attempt + 1,
+                    max_retries=max_retries,
+                    retry_after=delay,
+                    status_code=e.status,
+                    message=f"Retrying HTTP {e.status} in {delay}s "
+                    f"(attempt {attempt + 1}/{max_retries}): {error_label}",
+                    rate_limit_info=e.get_rate_limit_info(),
+                )
+
+                await asyncio.sleep(delay)
+
+    def _calculate_delay(self, error: HTTPError, attempt: int) -> float:
+        """Calculate retry delay, preferring Retry-After header when available.
+
+        Args:
+            error: The HTTP error with response headers
+            attempt: Zero-based attempt index
+
+        Returns:
+            Delay in seconds before next retry
+        """
+        if self.retry_config.respect_retry_after:
+            retry_after = error.get_retry_after()
+            if retry_after is not None:
+                return min(retry_after, self.retry_config.max_delay)
+
+        # Exponential backoff: 5s, 10s, 20s, ...
+        delay: float = min(
+            self.retry_config.base_delay * (2**attempt),
+            self.retry_config.max_delay,
+        )
+        return delay
 
     async def _generate_openai(
         self,

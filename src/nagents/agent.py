@@ -37,6 +37,7 @@ from .types import AudioContent
 from .types import ContentPart
 from .types import GenerationConfig
 from .types import Message
+from .types import RetryConfig
 from .types import TextContent
 from .types import ToolCall
 from .types import ToolDefinition
@@ -142,6 +143,7 @@ class Agent:
         batch_poll_interval: float = 30.0,
         stt_service: "STTService | None" = None,
         unsupported_audio: UnsupportedAudioBehavior = UnsupportedAudioBehavior.RAISE,
+        retry_config: RetryConfig | None = None,
     ):
         """
         Initialize the agent.
@@ -171,6 +173,11 @@ class Agent:
                                - DROP: Replace audio with a text warning
                                - TRANSCRIBE: Auto-transcribe using stt_service
                                  (requires stt_service to be set)
+            retry_config: Optional retry configuration for rate limit (HTTP 429)
+                          and server error (5xx) handling. If provided, overrides
+                          the provider's retry config. Retries are enabled by
+                          default (3 retries with exponential backoff). Set
+                          RetryConfig(max_retries=0) to disable.
         """
         self.provider = provider
         self.session = session_manager
@@ -182,6 +189,10 @@ class Agent:
         self.batch_poll_interval = batch_poll_interval
         self.stt_service = stt_service
         self.unsupported_audio = unsupported_audio
+
+        # Forward retry config to provider if provided
+        if retry_config is not None:
+            self.provider.retry_config = retry_config
 
         # Validate that TRANSCRIBE mode has an STT service
         if self.unsupported_audio == UnsupportedAudioBehavior.TRANSCRIBE and not self.stt_service:

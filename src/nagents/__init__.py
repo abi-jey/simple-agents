@@ -115,6 +115,7 @@ from .events import ErrorEvent
 from .events import Event
 from .events import EventType
 from .events import FinishReason
+from .events import RateLimitEvent
 from .events import ReasoningChunkEvent
 from .events import TextChunkEvent
 from .events import TextDoneEvent
@@ -152,6 +153,7 @@ from .types import JsonSchema
 from .types import JsonSchemaProperty
 from .types import JsonValue
 from .types import Message
+from .types import RetryConfig
 from .types import TextContent
 from .types import ToolArguments
 from .types import ToolCall
@@ -195,7 +197,9 @@ __all__ = [
     "OpenAISTTService",
     "Provider",
     "ProviderType",
+    "RateLimitEvent",
     "ReasoningChunkEvent",
+    "RetryConfig",
     "STTService",
     "SessionManager",
     "TextChunkEvent",

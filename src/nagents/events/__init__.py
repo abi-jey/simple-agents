@@ -5,6 +5,7 @@ from .types import ErrorEvent
 from .types import Event
 from .types import EventType
 from .types import FinishReason
+from .types import RateLimitEvent
 from .types import ReasoningChunkEvent
 from .types import TextChunkEvent
 from .types import TextDoneEvent
@@ -20,6 +21,7 @@ __all__ = [
     "Event",
     "EventType",
     "FinishReason",
+    "RateLimitEvent",
     "ReasoningChunkEvent",
     "TextChunkEvent",
     "TextDoneEvent",

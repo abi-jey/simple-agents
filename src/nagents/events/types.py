@@ -30,6 +30,7 @@ class EventType(Enum):
 
     # Meta events
     ERROR = "error"  # Error occurred
+    RATE_LIMIT = "rate_limit"  # Rate limit hit, retrying
     DONE = "done"  # Generation complete
 
 
@@ -149,6 +150,23 @@ class ErrorEvent(Event):
     message: str = ""
     code: str | None = None
     recoverable: bool = False
+
+
+@dataclass
+class RateLimitEvent(Event):
+    """Rate limit hit during generation, automatic retry in progress.
+
+    Emitted each time a retryable HTTP error (429 or 5xx) is encountered
+    and the provider will retry after a delay.
+    """
+
+    type: EventType = field(default=EventType.RATE_LIMIT)
+    attempt: int = 0  # Current retry attempt (1-based)
+    max_retries: int = 0  # Maximum retry attempts configured
+    retry_after: float = 0.0  # Delay in seconds before retry
+    status_code: int = 0  # HTTP status code (429, 500, etc.)
+    message: str = ""  # Human-readable message
+    rate_limit_info: dict[str, str] = field(default_factory=dict)  # x-ratelimit-* headers
 
 
 @dataclass
