@@ -857,11 +857,22 @@ class Agent:
 
             # Log context usage for this turn
             estimated_tokens = estimate_messages_tokens(messages)
-            context_limit = get_model_context_limit(self.provider)
-            usage_percent = (estimated_tokens / context_limit * 100) if context_limit > 0 else 0
+
+            # Get the context limit for display (priority: configured compact_on -> provider default)
+            display_limit = get_model_context_limit(self.provider)
+            trigger = self._resolve_compact_on()
+            if isinstance(trigger, Tokens):
+                assert trigger.input is not None and trigger.output is not None
+                # Show the threshold where compaction triggers (input - output)
+                display_limit = trigger.input - trigger.output
+                # Or show the original total if that's what was configured
+                if trigger.total is not None:
+                    display_limit = trigger.total
+
+            usage_percent = (estimated_tokens / display_limit * 100) if display_limit > 0 else 0
             logger.info(
                 f"Context usage: {len(messages)} messages, ~{estimated_tokens} tokens "
-                f"({usage_percent:.1f}% of {context_limit})"
+                f"({usage_percent:.1f}% of {display_limit})"
             )
 
             # Apply context compaction if configured
