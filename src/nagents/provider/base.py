@@ -15,6 +15,9 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 from ..adapters import openai as openai_adapter
+from ..compaction import get_model_context_limit
+from ..compactor import Messages
+from ..compactor import Tokens
 from ..events import ErrorEvent
 from ..events import Event
 from ..events import FinishReason
@@ -256,6 +259,25 @@ class Provider:
             MediaCapabilities describing supported audio, image, and document formats.
         """
         return get_media_capabilities(self.provider_type.value, self.model)
+
+    def get_default_compact_on(self) -> Tokens | Messages | None:
+        """Get the default compaction trigger for this model.
+
+        Returns model-specific compaction triggers based on known context limits.
+        Subclasses can override this for provider-specific defaults.
+
+        Returns:
+            Tokens or Messages trigger configuration, or None to use fallback.
+        """
+        context_limit = get_model_context_limit(self)
+        if context_limit == 0:
+            return None
+
+        # Default: compact at 80% of context limit, reserve 10% for output
+        return Tokens(
+            input=int(context_limit * 0.8),
+            output=int(context_limit * 0.1),
+        )
 
     async def generate(
         self,

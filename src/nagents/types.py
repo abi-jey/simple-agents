@@ -138,7 +138,7 @@ class Message:
     - None: For assistant messages with only tool calls
     """
 
-    role: Literal["system", "user", "assistant", "tool"]
+    role: Literal["system", "user", "assistant", "tool", "developer"]
     content: str | list[ContentPart] | None = None
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_call_id: str | None = None  # For tool result messages

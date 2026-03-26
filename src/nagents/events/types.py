@@ -28,6 +28,10 @@ class EventType(Enum):
     TOOL_CALL = "tool_call"  # Model wants to call a tool
     TOOL_RESULT = "tool_result"  # Tool execution completed
 
+    # Compaction events
+    COMPACTION_STARTED = "compaction_started"  # Context compaction started
+    COMPACTION_DONE = "compaction_done"  # Context compaction completed
+
     # Meta events
     ERROR = "error"  # Error occurred
     RATE_LIMIT = "rate_limit"  # Rate limit hit, retrying
@@ -177,3 +181,51 @@ class DoneEvent(Event):
     final_text: str = ""
     session_id: str | None = None
     finish_reason: FinishReason = FinishReason.STOP
+
+
+@dataclass
+class CompactionStartedEvent(Event):
+    """Event emitted when compaction begins.
+
+    Attributes:
+        trigger: The trigger that caused compaction (Tokens or Messages)
+        message_count: Number of messages before compaction
+        estimated_tokens: Estimated token count before compaction
+        session_id: Original session ID
+        compaction_session_id: Session ID used for compaction
+    """
+
+    type: EventType = field(default=EventType.COMPACTION_STARTED)
+    trigger: Any = None  # Tokens | Messages - using Any to avoid circular import
+    message_count: int = 0
+    estimated_tokens: int = 0
+    session_id: str = ""
+    compaction_session_id: str = ""
+
+
+@dataclass
+class CompactionDoneEvent(Event):
+    """Event emitted when compaction completes.
+
+    Attributes:
+        original_message_count: Number of messages before compaction
+        original_token_count: Estimated tokens before compaction
+        new_message_count: Number of messages after compaction
+        summary_tokens: Estimated tokens in the summary
+        summary_text: Full summary text
+        trigger: The trigger that caused compaction
+        compactor_used: Model name used for compaction ("self" or model name)
+        session_id: Original session ID
+        compaction_session_id: Session ID used for compaction
+    """
+
+    type: EventType = field(default=EventType.COMPACTION_DONE)
+    original_message_count: int = 0
+    original_token_count: int = 0
+    new_message_count: int = 0
+    summary_tokens: int = 0
+    summary_text: str = ""
+    trigger: Any = None  # Tokens | Messages - using Any to avoid circular import
+    compactor_used: str = ""
+    session_id: str = ""
+    compaction_session_id: str = ""

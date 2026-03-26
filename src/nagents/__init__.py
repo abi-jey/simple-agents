@@ -110,6 +110,16 @@ from .batch import BatchStore
 from .batch import BatchToolCall
 from .batch import ToolCallFunction
 from .batch import UsageInfo
+from .compaction import estimate_messages_tokens
+from .compaction import get_model_context_limit
+from .compaction import truncate_tool_results
+from .compactor import DEFAULT_COMPACTOR
+from .compactor import DEFAULT_COMPACT_PROMPT
+from .compactor import Compactor
+from .compactor import Messages
+from .compactor import Tokens
+from .events import CompactionDoneEvent
+from .events import CompactionStartedEvent
 from .events import DoneEvent
 from .events import ErrorEvent
 from .events import Event
@@ -161,6 +171,8 @@ from .types import ToolDefinition
 
 __all__ = [
     "AUDIO_MIME_TYPES",
+    "DEFAULT_COMPACTOR",
+    "DEFAULT_COMPACT_PROMPT",
     "DOCUMENT_MIME_TYPES",
     "IMAGE_MIME_TYPES",
     "OPENAI_TRANSCRIPTION_FORMATS",
@@ -176,6 +188,9 @@ __all__ = [
     "BatchStatus",
     "BatchStore",
     "BatchToolCall",
+    "CompactionDoneEvent",
+    "CompactionStartedEvent",
+    "Compactor",
     "ContentPart",
     "DocumentContent",
     "DoneEvent",
@@ -193,6 +208,7 @@ __all__ = [
     "JsonValue",
     "MediaCapabilities",
     "Message",
+    "Messages",
     "NagentsError",
     "OpenAISTTService",
     "Provider",
@@ -206,6 +222,7 @@ __all__ = [
     "TextContent",
     "TextDoneEvent",
     "TokenUsage",
+    "Tokens",
     "ToolArguments",
     "ToolCall",
     "ToolCallEvent",
@@ -221,6 +238,9 @@ __all__ = [
     "UnsupportedAudioError",
     "Usage",
     "UsageInfo",
+    "estimate_messages_tokens",
     "get_media_capabilities",
+    "get_model_context_limit",
     "transcode_audio_to_wav",
+    "truncate_tool_results",
 ]

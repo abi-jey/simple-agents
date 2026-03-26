@@ -1,0 +1,220 @@
+"""Context compaction utilities for managing conversation history.
+
+This module provides utility functions for token estimation and context limit detection.
+For agent-based compaction, see the Compactor class and related events in compactor.py.
+"""
+
+import logging
+from typing import TYPE_CHECKING
+
+from .types import ContentPart
+from .types import Message
+from .types import TextContent
+
+if TYPE_CHECKING:
+    from .provider import Provider
+
+logger = logging.getLogger(__name__)
+
+# Default context limit for unknown models
+DEFAULT_CONTEXT_LIMIT = 200000
+
+# Approximate characters per token (GPT-style tokenization)
+CHARS_PER_TOKEN = 4
+
+# Maximum tool result characters to keep in context before truncation
+MAX_TOOL_RESULT_CHARS = 10000
+
+
+def estimate_tokens(content: str | list[ContentPart] | None) -> int:
+    """Estimate token count for content.
+
+    Uses a simple heuristic: ~4 characters per token for text.
+    For multimodal content, estimates based on content type.
+
+    Args:
+        content: Message content (string, list of ContentParts, or None)
+
+    Returns:
+        Estimated token count
+    """
+    if content is None:
+        return 0
+
+    if isinstance(content, str):
+        if len(content) == 0:
+            return 0
+        return max(1, len(content) // CHARS_PER_TOKEN)
+
+    total = 0
+    for part in content:
+        if isinstance(part, TextContent):
+            total += max(1, len(part.text) // CHARS_PER_TOKEN)
+        else:
+            # For images/audio/documents, estimate based on base64 size
+            if hasattr(part, "base64_data") and part.base64_data:
+                # Base64 is ~4/3 of binary, tokens are roughly chars/4
+                # For images, this is a rough estimate
+                total += max(100, len(part.base64_data) // (CHARS_PER_TOKEN * 4))
+            else:
+                total += 10  # Minimal estimate for unknown parts
+
+    return total
+
+
+def estimate_messages_tokens(messages: list[Message]) -> int:
+    """Estimate total token count for a list of messages.
+
+    Includes message overhead (role, metadata, etc.).
+
+    Args:
+        messages: List of messages to estimate
+
+    Returns:
+        Estimated total token count
+    """
+    total = 0
+    for msg in messages:
+        # Role overhead (~4 tokens for role markers)
+        total += 4
+
+        # Content
+        total += estimate_tokens(msg.content)
+
+        # Tool calls (arguments are often large JSON)
+        if msg.tool_calls:
+            for tc in msg.tool_calls:
+                total += len(tc.name) // CHARS_PER_TOKEN + 4
+                # Arguments are often large JSON objects
+                if tc.arguments:
+                    import json
+
+                    args_str = json.dumps(tc.arguments)
+                    total += len(args_str) // CHARS_PER_TOKEN
+                # Metadata
+                if tc.metadata:
+                    total += len(str(tc.metadata)) // CHARS_PER_TOKEN
+
+        # Tool call ID and name overhead
+        if msg.tool_call_id:
+            total += len(msg.tool_call_id) // CHARS_PER_TOKEN
+        if msg.name:
+            total += len(msg.name) // CHARS_PER_TOKEN
+
+    return total
+
+
+def truncate_tool_results(messages: list[Message], max_chars: int = MAX_TOOL_RESULT_CHARS) -> list[Message]:
+    """Truncate large tool results in messages.
+
+    Replaces large tool result content with a placeholder indicating
+    the result was truncated.
+
+    Args:
+        messages: List of messages to process
+        max_chars: Maximum characters for tool results (default: 10000)
+
+    Returns:
+        List of messages with truncated tool results
+    """
+    result = []
+    for msg in messages:
+        if msg.role == "tool" and isinstance(msg.content, str) and len(msg.content) > max_chars:
+            truncated_msg = Message(
+                role=msg.role,
+                content=f"[Tool result truncated - {len(msg.content)} chars total. "
+                f"Result was too large for context. Ask to re-run if needed.]",
+                tool_call_id=msg.tool_call_id,
+                name=msg.name,
+            )
+            result.append(truncated_msg)
+            continue
+        result.append(msg)
+    return result
+
+
+def get_model_context_limit(provider: "Provider") -> int:
+    """Get the context window limit for a provider's model.
+
+    This is a best-effort estimation based on known model limits.
+    For unknown models, returns a safe default of 200,000 tokens.
+
+    Args:
+        provider: The LLM provider
+
+    Returns:
+        Estimated context window limit in tokens
+    """
+    model = provider.model.lower() if provider.model else ""
+
+    # Known model context limits (as of 2024)
+    # Order matters: check more specific models first
+
+    # OpenAI - check gpt-4o and gpt-4-turbo before gpt-4
+    if "gpt-4o" in model or "gpt-4o-mini" in model:
+        return 128000
+    if "gpt-4-turbo" in model or "gpt-4-0125" in model or "gpt-4-1106" in model:
+        return 128000
+    if "gpt-4-32k" in model:
+        return 32768
+    if "gpt-4" in model:
+        return 8192
+    if "gpt-3.5-turbo-16k" in model:
+        return 16384
+    if "gpt-3.5-turbo" in model:
+        return 4096
+    # OpenAI o-series (reasoning models)
+    if "o1-" in model or "o3-" in model or "o4-" in model:
+        return 200000
+    if "gpt-5" in model:
+        return 200000
+
+    # Anthropic Claude
+    if "claude-3-opus" in model or "claude-3-sonnet" in model or "claude-3-haiku" in model:
+        return 200000
+    if "claude-3.5" in model:
+        return 200000
+    if "claude-2" in model:
+        return 100000
+    if "claude" in model:
+        return 100000
+
+    # Google Gemini
+    if "gemini-1.5-pro" in model or "gemini-1.5-flash" in model:
+        return 1000000  # 1M tokens
+    if "gemini-2.5" in model:
+        return 1000000  # 1M tokens
+    if "gemini-pro" in model:
+        return 32000
+
+    # DeepSeek
+    if "deepseek" in model:
+        return 64000
+
+    # Kimi / Moonshot
+    if "kimi" in model or "moonshot" in model:
+        return 128000
+
+    # GLM / Zhipu
+    if "glm" in model or "chatglm" in model:
+        return 128000
+
+    # Llama
+    if "llama-3" in model and "70b" in model:
+        return 128000
+    if "llama-3" in model:
+        return 8192
+
+    # Mistral
+    if "mistral-large" in model or "mistral-medium" in model:
+        return 32000
+    if "mistral" in model:
+        return 32000
+
+    # Fireworks / FW- models
+    if "fw-" in model:
+        return 8000  # Conservative default
+
+    # Unknown model - use safe default
+    logger.debug(f"Unknown model context limit for: {model}, using default {DEFAULT_CONTEXT_LIMIT}")
+    return DEFAULT_CONTEXT_LIMIT

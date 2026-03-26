@@ -10,11 +10,23 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
+from typing import Literal
 
 from .batch import BatchClient
 from .batch import BatchConfig
 from .batch import BatchRequest
 from .batch import BatchStatus
+from .compaction import estimate_messages_tokens
+from .compaction import get_model_context_limit
+from .compaction import truncate_tool_results
+from .compactor import DEFAULT_COMPACTOR
+from .compactor import DEFAULT_COMPACT_PROMPT
+from .compactor import CompactionDoneEvent
+from .compactor import CompactionStartedEvent
+from .compactor import Compactor
+from .compactor import Messages
+from .compactor import Tokens
+from .compactor import generate_compaction_session_id
 from .events import DoneEvent
 from .events import ErrorEvent
 from .events import Event
@@ -44,6 +56,15 @@ from .types import ToolDefinition
 
 if TYPE_CHECKING:
     from .stt import STTService
+
+
+class _CompactorNotSet:
+    """Sentinel value to distinguish 'not set' from 'explicitly set to None'."""
+
+    pass
+
+
+_COMPACTOR_NOT_SET = _CompactorNotSet()
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +165,9 @@ class Agent:
         stt_service: "STTService | None" = None,
         unsupported_audio: UnsupportedAudioBehavior = UnsupportedAudioBehavior.RAISE,
         retry_config: RetryConfig | None = None,
+        compactor: Compactor | Literal["self"] | None | object = _COMPACTOR_NOT_SET,
+        compact_on: Tokens | Messages | None = None,
+        compact_prompt: str | None = None,
     ):
         """
         Initialize the agent.
@@ -178,6 +202,17 @@ class Agent:
                           the provider's retry config. Retries are enabled by
                           default (3 retries with exponential backoff). Set
                           RetryConfig(max_retries=0) to disable.
+            compactor: Context compaction configuration. Options:
+                      - None (default): Use DEFAULT_COMPACTOR with main agent's provider
+                      - "self": Use the main agent for compaction (same provider/model)
+                      - Compactor: Use a separate agent for compaction
+                      - To disable compaction, don't specify and set compact_on=None explicitly
+            compact_on: When to trigger compaction. Options:
+                       - Tokens(input=N, output=M): Compact when tokens >= N-M
+                       - Messages(length=N): Compact when message count >= N
+                       - None: Use resolution order (agent -> compactor -> provider default)
+            compact_prompt: Custom prompt for "self" compaction. If None, uses
+                           DEFAULT_COMPACT_PROMPT.
         """
         self.provider = provider
         self.session = session_manager
@@ -189,6 +224,14 @@ class Agent:
         self.batch_poll_interval = batch_poll_interval
         self.stt_service = stt_service
         self.unsupported_audio = unsupported_audio
+
+        # Compaction configuration
+        # None (default) -> use DEFAULT_COMPACTOR
+        # "self" -> use main agent for compaction
+        # Compactor -> use separate agent for compaction
+        self.compactor = compactor
+        self.compact_on = compact_on
+        self.compact_prompt = compact_prompt or DEFAULT_COMPACT_PROMPT
 
         # Forward retry config to provider if provided
         if retry_config is not None:
@@ -461,6 +504,257 @@ class Agent:
             )
         return filtered
 
+    def _resolve_compactor(self) -> Compactor | Literal["self"] | None:
+        """Resolve which compactor to use.
+
+        Returns:
+            - None: No compaction (user explicitly set compactor=None)
+            - "self": Use main agent for compaction
+            - Compactor: Use configured compactor or DEFAULT_COMPACTOR
+        """
+        # If compactor is the sentinel (not set), use DEFAULT_COMPACTOR
+        if isinstance(self.compactor, _CompactorNotSet):
+            return DEFAULT_COMPACTOR
+
+        # If compactor is explicitly None, no compaction
+        if self.compactor is None:
+            return None
+
+        # If compactor is "self", use main agent
+        if self.compactor == "self":
+            return "self"
+
+        # If compactor is a Compactor instance, use it
+        if isinstance(self.compactor, Compactor):
+            return self.compactor
+
+        # Fallback: use DEFAULT_COMPACTOR
+        return DEFAULT_COMPACTOR
+
+    def _resolve_compact_on(self) -> Tokens | Messages | None:
+        """Resolve the compaction trigger configuration.
+
+        Resolution order:
+        1. Main agent's compact_on
+        2. Compactor's compact_on (if separate)
+        3. Provider's default
+        4. Fallback based on model context limit
+        """
+        # 1. Main agent's compact_on
+        if self.compact_on is not None:
+            return self.compact_on
+
+        # 2. Compactor's compact_on (if separate and configured)
+        compactor = self._resolve_compactor()
+        if isinstance(compactor, Compactor) and compactor.compact_on is not None:
+            return compactor.compact_on
+
+        # 3. Provider's default
+        default = self.provider.get_default_compact_on()
+        if default is not None:
+            return default
+
+        # 4. Fallback based on model context limit
+        context_limit = get_model_context_limit(self.provider)
+        if context_limit == 0:
+            return None  # Unknown model, no compaction
+
+        return Tokens(input=int(context_limit * 0.8), output=int(context_limit * 0.1))
+
+    def _should_compact(self, messages: list[Message], trigger: Tokens | Messages) -> bool:
+        """Check if compaction should trigger based on the trigger config.
+
+        Args:
+            messages: List of messages to check
+            trigger: Trigger configuration (Tokens or Messages)
+
+        Returns:
+            True if compaction should trigger, False otherwise
+        """
+        if isinstance(trigger, Tokens):
+            estimated = estimate_messages_tokens(messages)
+            return estimated >= (trigger.input - trigger.output)
+        else:  # Messages
+            return len(messages) >= trigger.length
+
+    async def _maybe_compact(self, messages: list[Message], session_id: str) -> AsyncIterator[Event]:
+        """Run compaction if needed.
+
+        Yields CompactionStartedEvent and CompactionDoneEvent if compaction occurs.
+        Updates the session history with the compaction summary.
+
+        Args:
+            messages: Current message list
+            session_id: Session ID
+
+        Yields:
+            CompactionStartedEvent, CompactionDoneEvent if compaction occurs
+        """
+        compactor = self._resolve_compactor()
+
+        # Log compactor resolution
+        if isinstance(compactor, _CompactorNotSet):
+            logger.debug("Compactor: DEFAULT_COMPACTOR (not set)")
+        elif compactor is None:
+            logger.debug("Compactor: None (disabled)")
+            return
+        elif compactor == "self":
+            logger.debug("Compactor: self (using main agent)")
+        else:
+            logger.debug(f"Compactor: {type(compactor).__name__} (model={compactor.get_model_name()})")
+
+        # No compaction if compactor is None
+        if compactor is None:
+            return
+
+        # Resolve trigger config
+        trigger = self._resolve_compact_on()
+        if trigger is None:
+            logger.debug("Compaction trigger: None (disabled)")
+            return
+
+        # Log trigger config
+        if isinstance(trigger, Tokens):
+            logger.debug(f"Compaction trigger: Tokens(input={trigger.input}, output={trigger.output})")
+        else:
+            logger.debug(f"Compaction trigger: Messages(length={trigger.length})")
+
+        # Check if compaction needed
+        estimated_tokens = estimate_messages_tokens(messages)
+        logger.debug(f"Compaction check: {len(messages)} messages, ~{estimated_tokens} tokens")
+
+        if not self._should_compact(messages, trigger):
+            if isinstance(trigger, Tokens):
+                threshold = trigger.input - trigger.output
+                logger.debug(f"Compaction skipped: {estimated_tokens} tokens < {threshold} threshold")
+            else:
+                logger.debug(f"Compaction skipped: {len(messages)} messages < {trigger.length} threshold")
+            return
+
+        # Get info before compaction
+        original_count = len(messages)
+        original_tokens = estimate_messages_tokens(messages)
+        compaction_session_id = generate_compaction_session_id(session_id)
+
+        # Log compaction starting
+        logger.info(
+            f"Compaction started: {original_count} messages, ~{original_tokens} tokens, "
+            f"session={session_id}, compaction_session={compaction_session_id}"
+        )
+
+        # Yield start event
+        yield CompactionStartedEvent(
+            trigger=trigger,
+            message_count=original_count,
+            estimated_tokens=original_tokens,
+            session_id=session_id,
+            compaction_session_id=compaction_session_id,
+        )
+
+        # Build compaction prompt
+        if compactor == "self":
+            compaction_prompt = self.compact_prompt
+            compactor_used = self.provider.model
+            logger.info(f"Compaction using: self (model={compactor_used})")
+        else:
+            compaction_prompt = compactor.system_prompt
+            compactor_used = compactor.get_model_name()
+            logger.info(f"Compaction using: {compactor_used}")
+
+        # Truncate large tool results before compaction
+        truncated_messages = truncate_tool_results(messages, max_chars=10000)
+
+        # Create compaction request
+        compaction_request_messages = [
+            Message(role="developer", content=compaction_prompt),
+            Message(
+                role="user",
+                content="Please summarize the conversation above. Preserve all important context, decisions, and action items.",
+            ),
+        ]
+
+        # Take only last N messages for context
+        max_context_messages = min(50, len(truncated_messages))
+        context_messages = (
+            truncated_messages[-max_context_messages:]
+            if len(truncated_messages) > max_context_messages
+            else truncated_messages
+        )
+
+        logger.debug(f"Compaction context: {len(context_messages)} messages (max {max_context_messages})")
+
+        # Add context to request
+        all_messages: list[Message] = []
+        all_messages.extend(compaction_request_messages)
+        all_messages.extend(context_messages)
+
+        # Run compaction
+        summary_text = ""
+        try:
+            # Determine which provider to use
+            if compactor == "self":
+                compaction_provider = self.provider
+            elif isinstance(compactor, Compactor) and compactor.provider:
+                compaction_provider = compactor.provider
+            else:
+                compaction_provider = self.provider
+
+            logger.debug(f"Compaction request: {len(all_messages)} messages to {compaction_provider.model}")
+
+            # Collect the summary
+            async for event in compaction_provider.generate(
+                messages=all_messages,
+                stream=False,
+            ):
+                if isinstance(event, TextDoneEvent):
+                    summary_text = event.text
+                    logger.debug(f"Compaction summary received: {len(summary_text)} chars")
+                    break
+
+        except Exception as e:
+            logger.error(f"Compaction failed: {e}")
+            # Still yield done event with error info
+            yield CompactionDoneEvent(
+                original_message_count=original_count,
+                original_token_count=original_tokens,
+                new_message_count=original_count,
+                summary_tokens=0,
+                summary_text=f"[Compaction failed: {e}]",
+                trigger=trigger,
+                compactor_used=compactor_used,
+                session_id=session_id,
+                compaction_session_id=compaction_session_id,
+            )
+            return
+
+        # Store summary in session
+        summary_msg = Message(
+            role="developer",
+            content=f"[Context Compaction Summary]\n{summary_text}",
+        )
+        await self.session.add_message(session_id, summary_msg)
+
+        # Yield done event
+        new_count = 1  # Just the summary
+        summary_tokens = estimate_messages_tokens([summary_msg])
+
+        yield CompactionDoneEvent(
+            original_message_count=original_count,
+            original_token_count=original_tokens,
+            new_message_count=new_count,
+            summary_tokens=summary_tokens,
+            summary_text=summary_text,
+            trigger=trigger,
+            compactor_used=compactor_used,
+            session_id=session_id,
+            compaction_session_id=compaction_session_id,
+        )
+
+        logger.info(
+            f"Compaction complete: {original_count} -> {new_count} messages, "
+            f"{original_tokens} -> {summary_tokens} tokens"
+        )
+
     async def run(
         self,
         user_message: str | list[ContentPart] | Message,
@@ -557,6 +851,19 @@ class Agent:
 
             # Filter unsupported audio from all messages (including history)
             messages = self._filter_unsupported_audio(messages)
+
+            # Apply context compaction if configured
+            async for event in self._maybe_compact(messages, session_id):
+                yield event
+                # Update messages if compaction was done
+                if isinstance(event, CompactionDoneEvent):
+                    # Reload compacted history from session
+                    messages = []
+                    if self.system_prompt:
+                        messages.append(Message(role="system", content=self.system_prompt))
+                    history = await self.session.get_history(session_id)
+                    messages.extend(history)
+                    messages = self._filter_unsupported_audio(messages)
 
             # Generate response
             pending_tool_calls: list[ToolCall] = []

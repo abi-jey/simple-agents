@@ -1,5 +1,7 @@
 """Events submodule for v2 LLM integration."""
 
+from .types import CompactionDoneEvent
+from .types import CompactionStartedEvent
 from .types import DoneEvent
 from .types import ErrorEvent
 from .types import Event
@@ -16,6 +18,8 @@ from .types import ToolResultType
 from .types import Usage
 
 __all__ = [
+    "CompactionDoneEvent",
+    "CompactionStartedEvent",
     "DoneEvent",
     "ErrorEvent",
     "Event",
