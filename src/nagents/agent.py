@@ -247,6 +247,10 @@ class Agent:
         self.tool_registry = ToolRegistry()
         self.tool_executor = ToolExecutor(self.tool_registry)
 
+        # Track actual prompt_tokens from API responses per session
+        # Maps session_id -> last known prompt_tokens
+        self._session_tokens: dict[str, int] = {}
+
         self._initialized = False
         self._http_logger: FileHTTPLogger | None = None
         self._batch_client: BatchClient | None = None
@@ -855,8 +859,22 @@ class Agent:
             # Filter unsupported audio from all messages (including history)
             messages = self._filter_unsupported_audio(messages)
 
-            # Log context usage for this turn
-            estimated_tokens = estimate_messages_tokens(messages)
+            # Get stored prompt_tokens from previous API calls (or estimate if first call)
+            stored_prompt_tokens = self._session_tokens.get(session_id, 0)
+
+            # Estimate tokens for new user message (not yet in history)
+            new_message_tokens = estimate_messages_tokens([processed_message])
+
+            # Total context: stored prompt_tokens + estimated new tokens
+            # Use stored tokens from last API response (actual) + estimate for new message
+            if stored_prompt_tokens > 0:
+                # We have actual tokens from previous response
+                context_tokens = stored_prompt_tokens + new_message_tokens
+                tokens_source = "actual"
+            else:
+                # First call or after compaction - estimate everything
+                context_tokens = estimate_messages_tokens(messages)
+                tokens_source = "estimated"
 
             # Get the context limit for display (priority: configured compact_on -> provider default)
             display_limit = get_model_context_limit(self.provider)
@@ -869,9 +887,9 @@ class Agent:
                 if trigger.total is not None:
                     display_limit = trigger.total
 
-            usage_percent = (estimated_tokens / display_limit * 100) if display_limit > 0 else 0
+            usage_percent = (context_tokens / display_limit * 100) if display_limit > 0 else 0
             logger.info(
-                f"Context usage: {len(messages)} messages, ~{estimated_tokens} tokens "
+                f"Context usage: {len(messages)} messages, {context_tokens} tokens ({tokens_source}) "
                 f"({usage_percent:.1f}% of {display_limit})"
             )
 
@@ -887,6 +905,9 @@ class Agent:
                     history = await self.session.get_history(session_id)
                     messages.extend(history)
                     messages = self._filter_unsupported_audio(messages)
+                    # Reset token tracking after compaction (context was summarized)
+                    # The next API call will give us new actual prompt_tokens
+                    self._session_tokens[session_id] = event.summary_tokens
 
             # Generate response
             pending_tool_calls: list[ToolCall] = []
@@ -906,6 +927,8 @@ class Agent:
                         completion_tokens=event.usage.completion_tokens,
                         total_tokens=event.usage.total_tokens,
                     )
+                    # Store actual prompt_tokens for this session (cumulative input tokens)
+                    self._session_tokens[session_id] = last_usage.prompt_tokens
                 else:
                     # Use last known usage for events without usage data
                     event.usage = Usage(
