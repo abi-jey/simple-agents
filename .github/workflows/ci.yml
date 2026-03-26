@@ -77,15 +77,7 @@ jobs:
         run: python -c "from nagents import Agent, Provider, ProviderType; print('Package imports work')"
 
       - name: Run tests
-        run: pytest tests/ -v --cov=nagents --cov-report=xml --cov-report=term-missing
-
-      - name: Upload coverage
-        if: matrix.python-version == '3.12'
-        uses: codecov/codecov-action@v5
-        with:
-          files: ./coverage.xml
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
+        run: pytest tests/ -v
 
   # =============================================================================
   # MACOS TESTS
