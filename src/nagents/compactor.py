@@ -38,15 +38,32 @@ Be concise but thorough. Preserve all critical information."""
 class Tokens:
     """Token-based compaction trigger.
 
-    Compaction triggers when estimated input tokens >= (input - output).
+    Compaction triggers when estimated tokens >= threshold.
+
+    Can be configured in two ways:
+    1. Total context window: Tokens(total=200000) - compacts at 80% utilization
+    2. Detailed: Tokens(input=100000, output=8000) - compact when tokens >= input - output
 
     Attributes:
-        input: Maximum input context tokens before compaction
-        output: Reserved tokens for output/response
+        total: Total context window size (triggers at 80% utilization)
+        input: Maximum input context tokens before compaction (used if total not set)
+        output: Reserved tokens for output/response (default 10% of context)
     """
 
-    input: int
-    output: int = 8000
+    total: int | None = None
+    input: int | None = None
+    output: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.total is not None:
+            if self.input is not None or self.output is not None:
+                raise ValueError("Cannot specify both 'total' and 'input'/'output'")
+            self.input = int(self.total * 0.8)
+            self.output = int(self.total * 0.1)
+        elif self.input is None:
+            raise ValueError("Must specify either 'total' or 'input'")
+        if self.output is None:
+            self.output = 8000
 
 
 @dataclass

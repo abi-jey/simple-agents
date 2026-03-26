@@ -559,7 +559,7 @@ class Agent:
         if context_limit == 0:
             return None  # Unknown model, no compaction
 
-        return Tokens(input=int(context_limit * 0.8), output=int(context_limit * 0.1))
+        return Tokens(total=context_limit)
 
     def _should_compact(self, messages: list[Message], trigger: Tokens | Messages) -> bool:
         """Check if compaction should trigger based on the trigger config.
@@ -573,6 +573,8 @@ class Agent:
         """
         if isinstance(trigger, Tokens):
             estimated = estimate_messages_tokens(messages)
+            # After __post_init__, input and output are guaranteed to be int
+            assert trigger.input is not None and trigger.output is not None
             return estimated >= (trigger.input - trigger.output)
         else:  # Messages
             return len(messages) >= trigger.length
@@ -625,6 +627,7 @@ class Agent:
 
         if not self._should_compact(messages, trigger):
             if isinstance(trigger, Tokens):
+                assert trigger.input is not None and trigger.output is not None
                 threshold = trigger.input - trigger.output
                 logger.debug(f"Compaction skipped: {estimated_tokens} tokens < {threshold} threshold")
             else:
@@ -851,6 +854,15 @@ class Agent:
 
             # Filter unsupported audio from all messages (including history)
             messages = self._filter_unsupported_audio(messages)
+
+            # Log context usage for this turn
+            estimated_tokens = estimate_messages_tokens(messages)
+            context_limit = get_model_context_limit(self.provider)
+            usage_percent = (estimated_tokens / context_limit * 100) if context_limit > 0 else 0
+            logger.info(
+                f"Context usage: {len(messages)} messages, ~{estimated_tokens} tokens "
+                f"({usage_percent:.1f}% of {context_limit})"
+            )
 
             # Apply context compaction if configured
             async for event in self._maybe_compact(messages, session_id):
