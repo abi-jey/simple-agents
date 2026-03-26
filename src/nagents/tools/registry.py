@@ -39,6 +39,11 @@ class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, ToolDefinition] = {}
 
+    def clear(self) -> None:
+        """Clear all registered tools."""
+        self._tools.clear()
+        logger.debug("Cleared all tools from registry")
+
     def register(
         self,
         func: Callable[..., Any],
