@@ -9,6 +9,8 @@ from typing import Any
 from typing import Literal
 from typing import TypedDict
 
+COMPACTION_SUMMARY_PREFIX = "[Context Compaction Summary]\nThe following summarizes earlier conversation history. Use this as context for continuing the conversation.\n---\n"
+
 # =============================================================================
 # JSON and Schema Type Definitions
 # =============================================================================
@@ -138,7 +140,7 @@ class Message:
     - None: For assistant messages with only tool calls
     """
 
-    role: Literal["system", "user", "assistant", "tool", "developer"]
+    role: Literal["system", "user", "assistant", "tool", "developer", "compaction_summary"]
     content: str | list[ContentPart] | None = None
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_call_id: str | None = None  # For tool result messages

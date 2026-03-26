@@ -7,6 +7,7 @@ Handles conversion between our internal types and Gemini REST API format.
 import uuid
 from typing import Any
 
+from ..types import COMPACTION_SUMMARY_PREFIX
 from ..types import AudioContent
 from ..types import ContentPart
 from ..types import DocumentContent
@@ -104,15 +105,19 @@ def format_request(
         "contents": format_contents(messages),
     }
 
-    # Extract system instruction from messages
     system_messages = [m for m in messages if m.role == "system"]
-    if system_messages:
-        # Collect all system parts
-        system_parts: list[dict[str, Any]] = []
-        for m in system_messages:
-            system_parts.extend(_format_content(m.content))
-        if system_parts:
-            body["systemInstruction"] = {"parts": system_parts}
+    compaction_messages = [m for m in messages if m.role == "compaction_summary"]
+
+    system_parts: list[dict[str, Any]] = []
+    for m in system_messages:
+        system_parts.extend(_format_content(m.content))
+
+    if compaction_messages:
+        compaction_text = "\n\n".join(m.content if isinstance(m.content, str) else "" for m in compaction_messages)
+        system_parts.append({"text": COMPACTION_SUMMARY_PREFIX + compaction_text})
+
+    if system_parts:
+        body["systemInstruction"] = {"parts": system_parts}
 
     if tools:
         body["tools"] = [{"functionDeclarations": format_tools(tools)}]
@@ -153,8 +158,9 @@ def format_contents(messages: list[Message]) -> list[dict[str, Any]]:
     contents = []
 
     for msg in messages:
-        # Skip system messages (handled separately)
         if msg.role == "system":
+            continue
+        if msg.role == "compaction_summary":
             continue
 
         # Map roles

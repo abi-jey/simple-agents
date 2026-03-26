@@ -7,6 +7,7 @@ Handles conversion between our internal types and Anthropic Claude API format.
 import json
 from typing import Any
 
+from ..types import COMPACTION_SUMMARY_PREFIX
 from ..types import AudioContent
 from ..types import ContentPart
 from ..types import DocumentContent
@@ -87,6 +88,7 @@ def format_messages(messages: list[Message]) -> tuple[str | None, list[dict[str,
     Convert our Message objects to Anthropic API format.
 
     Anthropic handles system messages separately, so we extract them.
+    Compaction summaries are appended to the system prompt.
 
     Args:
         messages: List of Message objects
@@ -95,17 +97,21 @@ def format_messages(messages: list[Message]) -> tuple[str | None, list[dict[str,
         Tuple of (system_prompt, messages_list)
     """
     system_prompt: str | None = None
+    compaction_summaries: list[str] = []
     result = []
 
     for msg in messages:
-        # Extract system message (Anthropic takes it as a separate parameter)
         if msg.role == "system":
             if isinstance(msg.content, str):
                 system_prompt = msg.content
             elif isinstance(msg.content, list):
-                # For multimodal system, extract text parts only
                 text_parts = [p.text for p in msg.content if isinstance(p, TextContent)]
                 system_prompt = "\n".join(text_parts) if text_parts else None
+            continue
+
+        if msg.role == "compaction_summary":
+            content_str = msg.content if isinstance(msg.content, str) else ""
+            compaction_summaries.append(content_str)
             continue
 
         formatted: dict[str, Any] = {"role": msg.role}
@@ -166,6 +172,13 @@ def format_messages(messages: list[Message]) -> tuple[str | None, list[dict[str,
                 formatted["content"] = formatted_content
 
         result.append(formatted)
+
+    if compaction_summaries:
+        combined = "\n\n".join(compaction_summaries)
+        if system_prompt:
+            system_prompt = system_prompt + "\n\n" + COMPACTION_SUMMARY_PREFIX + combined
+        else:
+            system_prompt = COMPACTION_SUMMARY_PREFIX + combined
 
     return system_prompt, result
 

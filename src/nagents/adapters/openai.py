@@ -8,6 +8,7 @@ Works with OpenAI, Gemini via OpenAI compatibility, OpenRouter, Ollama, etc.
 import json
 from typing import Any
 
+from ..types import COMPACTION_SUMMARY_PREFIX
 from ..types import AudioContent
 from ..types import ContentPart
 from ..types import DocumentContent
@@ -90,9 +91,18 @@ def format_messages(messages: list[Message]) -> list[dict[str, Any]]:
     Returns:
         List of message dicts in OpenAI format
     """
-    result = []
+    result: list[dict[str, Any]] = []
     for msg in messages:
-        formatted: dict[str, Any] = {"role": msg.role}
+        if msg.role == "compaction_summary":
+            formatted: dict[str, Any] = {"role": "developer"}
+            content_str = msg.content if isinstance(msg.content, str) else ""
+            formatted["content"] = (
+                COMPACTION_SUMMARY_PREFIX + content_str if content_str else COMPACTION_SUMMARY_PREFIX.rstrip()
+            )
+            result.append(formatted)
+            continue
+
+        formatted = {"role": msg.role}
 
         # Format content (handles str, list[ContentPart], or None)
         formatted_content = _format_content(msg.content)

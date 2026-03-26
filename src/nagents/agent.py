@@ -680,15 +680,10 @@ class Agent:
             ),
         ]
 
-        # Take only last N messages for context
-        max_context_messages = min(50, len(truncated_messages))
-        context_messages = (
-            truncated_messages[-max_context_messages:]
-            if len(truncated_messages) > max_context_messages
-            else truncated_messages
-        )
+        # Use all truncated messages for context (no artificial limit)
+        context_messages = truncated_messages
 
-        logger.debug(f"Compaction context: {len(context_messages)} messages (max {max_context_messages})")
+        logger.debug(f"Compaction context: {len(context_messages)} messages")
 
         # Add context to request
         all_messages: list[Message] = []
@@ -736,8 +731,8 @@ class Agent:
 
         # Store summary in session and set compaction boundary
         summary_msg = Message(
-            role="developer",
-            content=f"[Context Compaction Summary]\n{summary_text}",
+            role="compaction_summary",
+            content=summary_text,
         )
         summary_message_id = await self.session.add_message(session_id, summary_msg)
         await self.session.set_compaction_boundary(session_id, summary_message_id)
