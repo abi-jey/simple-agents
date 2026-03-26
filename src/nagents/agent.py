@@ -734,12 +734,13 @@ class Agent:
             )
             return
 
-        # Store summary in session
+        # Store summary in session and set compaction boundary
         summary_msg = Message(
             role="developer",
             content=f"[Context Compaction Summary]\n{summary_text}",
         )
-        await self.session.add_message(session_id, summary_msg)
+        summary_message_id = await self.session.add_message(session_id, summary_msg)
+        await self.session.set_compaction_boundary(session_id, summary_message_id)
 
         # Yield done event
         new_count = 1  # Just the summary

@@ -60,6 +60,7 @@ class SessionManager:
                 CREATE TABLE IF NOT EXISTS v2_sessions (
                     id TEXT PRIMARY KEY,
                     user_id TEXT NOT NULL,
+                    compacted_at_message_id INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
@@ -85,6 +86,12 @@ class SessionManager:
             )
             await db.commit()
 
+            # Migration: add compacted_at_message_id column to existing databases
+            try:
+                await db.execute("ALTER TABLE v2_sessions ADD COLUMN compacted_at_message_id INTEGER")
+                await db.commit()
+            except Exception:
+                pass  # Column already exists
         self._initialized = True
         logger.debug(f"Session database initialized at {self.db_path}")
 
@@ -133,33 +140,63 @@ class SessionManager:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
 
+            # Check for compaction boundary
+            boundary_cursor = await db.execute(
+                "SELECT compacted_at_message_id FROM v2_sessions WHERE id = ?",
+                (session_id,),
+            )
+            boundary_row = await boundary_cursor.fetchone()
+            compaction_boundary: int | None = None
+            if boundary_row and boundary_row["compacted_at_message_id"] is not None:
+                compaction_boundary = boundary_row["compacted_at_message_id"]
+
             if limit:
-                # Get most recent N messages
-                cursor = await db.execute(
-                    """SELECT * FROM (
-                        SELECT * FROM v2_messages
-                        WHERE session_id = ?
-                        ORDER BY id DESC
-                        LIMIT ?
-                    ) ORDER BY id ASC""",
-                    (session_id, limit),
-                )
+                # Get most recent N messages (respecting compaction boundary)
+                if compaction_boundary is not None:
+                    cursor = await db.execute(
+                        """SELECT * FROM (
+                            SELECT * FROM v2_messages
+                            WHERE session_id = ? AND id >= ?
+                            ORDER BY id DESC
+                            LIMIT ?
+                        ) ORDER BY id ASC""",
+                        (session_id, compaction_boundary, limit),
+                    )
+                else:
+                    cursor = await db.execute(
+                        """SELECT * FROM (
+                            SELECT * FROM v2_messages
+                            WHERE session_id = ?
+                            ORDER BY id DESC
+                            LIMIT ?
+                        ) ORDER BY id ASC""",
+                        (session_id, limit),
+                    )
             else:
-                cursor = await db.execute(
-                    "SELECT * FROM v2_messages WHERE session_id = ? ORDER BY id",
-                    (session_id,),
-                )
+                if compaction_boundary is not None:
+                    cursor = await db.execute(
+                        "SELECT * FROM v2_messages WHERE session_id = ? AND id >= ? ORDER BY id",
+                        (session_id, compaction_boundary),
+                    )
+                else:
+                    cursor = await db.execute(
+                        "SELECT * FROM v2_messages WHERE session_id = ? ORDER BY id",
+                        (session_id,),
+                    )
 
             rows = await cursor.fetchall()
             return [self._row_to_message(row) for row in rows]
 
-    async def add_message(self, session_id: str, message: Message) -> None:
+    async def add_message(self, session_id: str, message: Message) -> int:
         """
         Add a message to session history.
 
         Args:
             session_id: Session identifier
             message: Message to add
+
+        Returns:
+            The database row ID of the inserted message
         """
         await self.initialize()
 
@@ -175,7 +212,7 @@ class SessionManager:
             content_value = message.content
 
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
+            cursor = await db.execute(
                 """INSERT INTO v2_messages
                    (session_id, role, content, tool_calls, tool_call_id, name)
                    VALUES (?, ?, ?, ?, ?, ?)""",
@@ -188,11 +225,37 @@ class SessionManager:
                     message.name,
                 ),
             )
+            message_id = cursor.lastrowid
+            assert message_id is not None
             await db.execute(
                 "UPDATE v2_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (session_id,),
             )
             await db.commit()
+
+        return message_id
+
+    async def set_compaction_boundary(self, session_id: str, message_id: int) -> None:
+        """
+        Record a compaction boundary for a session.
+
+        After compaction, get_history() will only return messages
+        starting from this message_id (inclusive), filtering out
+        all older pre-compaction messages.
+
+        Args:
+            session_id: Session identifier
+            message_id: The message ID of the compaction summary
+        """
+        await self.initialize()
+
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE v2_sessions SET compacted_at_message_id = ? WHERE id = ?",
+                (message_id, session_id),
+            )
+            await db.commit()
+            logger.debug(f"Compaction boundary set: session={session_id}, message_id={message_id}")
 
     async def clear_session(self, session_id: str) -> None:
         """
