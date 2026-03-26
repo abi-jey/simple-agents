@@ -19,7 +19,7 @@ build-backend = "hatchling.build"
 text = "MIT"
 
 [project.optional-dependencies]
-dev = [ "pytest>=8.0", "pytest-asyncio>=0.24.0", "pytest-cov>=6.0.0", "ruff>=0.9.0", "mypy>=1.14.0", "pre-commit>=4.0.0",]
+dev = [ "ruff>=0.9.0", "mypy>=1.14.0", "pre-commit>=4.0.0",]
 docs = [ "mkdocs>=1.6.0", "mkdocs-material>=9.5.0", "mkdocstrings[python]>=0.27.0",]
 
 [project.urls]
@@ -31,7 +31,7 @@ Issues = "https://github.com/abi-jey/nagents/issues"
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-src = [ "src", "tests",]
+src = [ "src",]
 
 [tool.mypy]
 python_version = "3.11"
@@ -42,7 +42,6 @@ disallow_untyped_defs = true
 disallow_incomplete_defs = true
 check_untyped_defs = true
 mypy_path = "src"
-exclude = [ "tests/",]
 ignore_missing_imports = true
 
 [tool.ruff.lint]
@@ -53,20 +52,6 @@ ignore = [ "E501",]
 [tool.ruff.format]
 quote-style = "double"
 
-[tool.pytest.ini_options]
-testpaths = [ "tests",]
-pythonpath = [ "src",]
-asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
-addopts = "-v --tb=short"
-
-[tool.coverage.run]
-source = [ "src/nagents",]
-branch = true
-
-[tool.coverage.report]
-exclude_lines = [ "pragma: no cover", "def __repr__", "raise NotImplementedError", "if TYPE_CHECKING:", "if __name__ == .__main__.:",]
-
 [tool.ruff.lint.isort]
 force-single-line = true
 case-sensitive = true
@@ -76,7 +61,7 @@ known-first-party = [ "nagents",]
 packages = [ "src/nagents",]
 
 [tool.hatch.build.targets.sdist]
-include = [ "/src", "/tests", "/docs", "LICENSE", "README.md", "pyproject.toml",]
+include = [ "/src", "/docs", "LICENSE", "README.md", "pyproject.toml",]
 
 [tool.poetry.group.docs.dependencies]
 mkdocs-material = "^9.7.1"
