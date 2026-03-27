@@ -43,6 +43,8 @@ This summary should be representative of whole converstation and actions that we
 Nothing should be left out
 
 Be concise and try to perseve as much information as possible. The summary should be addressing the AI agent as You.
+
+Include last few messages from user and agent in the summary.
 ===
 """
 
