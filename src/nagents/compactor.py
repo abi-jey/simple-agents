@@ -23,15 +23,22 @@ if TYPE_CHECKING:
     from .provider import Provider
 
 # Default system prompt for compaction
-DEFAULT_COMPACT_PROMPT = """You are a context compaction assistant.
-Summarize the conversation history in organized sections.
-Focus on:
-- What was discussed
-- Key decisions made
-- What needs to be done next
-- Important context for continuing the conversation
+DEFAULT_COMPACT_PROMPT = """
 
-Be concise but thorough. Preserve all critical information."""
+Below is a conversation history  between an AI Autonomous Agent and the Human User.
+Summarize the conversation history in organized sections.
+- The timeline of events and What was dicussed
+- What were different todos and goals and decisions were made
+- What are things that are done and what is pending and still needs to be done.
+- Context about environment, tools, and resources, for example: "for performing Task A You decided to tool x, y, z and
+this was the becuase the user said abc, and environment had pqr.", or "host name for machine is abc, and we can use user abc."
+
+This summary should be representative of whole converstation and actions that were taken.
+Nothing should be left out
+
+Be concise and try to perseve as much information as possible. The summary should be addressing the AI agent as You.
+===
+"""
 
 
 @dataclass
