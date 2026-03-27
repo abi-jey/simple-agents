@@ -218,3 +218,46 @@ def get_model_context_limit(provider: "Provider") -> int:
     # Unknown model - use safe default
     logger.debug(f"Unknown model context limit for: {model}, using default {DEFAULT_CONTEXT_LIMIT}")
     return DEFAULT_CONTEXT_LIMIT
+
+
+def format_messages_as_text(messages: list[Message]) -> str:
+    """Format messages as a single text string for compaction.
+
+    Args:
+        messages: List of messages to format
+
+    Returns:
+        Formatted text string representing the conversation
+    """
+    import json
+
+    lines = []
+    for msg in messages:
+        role = msg.role.upper()
+        if msg.role == "system":
+            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+            lines.append(f"[SYSTEM]\n{content}\n")
+        elif msg.role == "user":
+            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+            lines.append(f"[USER]\n{content}\n")
+        elif msg.role == "assistant":
+            if msg.content:
+                lines.append(f"[ASSISTANT]\n{msg.content}\n")
+            if msg.tool_calls:
+                for tc in msg.tool_calls:
+                    args_str = json.dumps(tc.arguments) if tc.arguments else "{}"
+                    lines.append(f"[ASSISTANT TOOL CALL: {tc.name}]\n{args_str}\n")
+        elif msg.role == "tool":
+            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+            lines.append(f"[TOOL RESULT: {msg.name}]\n{content}\n")
+        elif msg.role == "developer":
+            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+            lines.append(f"[DEVELOPER]\n{content}\n")
+        elif msg.role == "compaction_summary":
+            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+            lines.append(f"[PREVIOUS SUMMARY]\n{content}\n")
+        else:
+            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+            lines.append(f"[{role}]\n{content}\n")
+
+    return "\n".join(lines)

@@ -1052,3 +1052,73 @@ class Provider:
 
     async def __aexit__(self, *args: object) -> None:
         await self.close()
+
+
+class PlaceholderProvider(Provider):
+    """Placeholder provider that raises errors when used.
+
+    Used by Compactor when provider is not yet set. The main agent
+    will inject its provider before calling run().
+    """
+
+    def __init__(self) -> None:
+        # Don't call super().__init__ - we don't have real values
+        self._is_placeholder = True
+        self._http = None  # type: ignore[assignment]
+
+    def __repr__(self) -> str:
+        return "<PlaceholderProvider>"
+
+    def _raise_placeholder_error(self) -> None:
+        raise RuntimeError(
+            "PlaceholderProvider has not been replaced. The main agent must inject its provider before calling run()."
+        )
+
+    @property
+    def provider_type(self) -> ProviderType:  # type: ignore[override]
+        self._raise_placeholder_error()
+        raise AssertionError("unreachable")
+
+    @property
+    def api_key(self) -> str:  # type: ignore[override]
+        self._raise_placeholder_error()
+        raise AssertionError("unreachable")
+
+    @property
+    def model(self) -> str:  # type: ignore[override]
+        self._raise_placeholder_error()
+        raise AssertionError("unreachable")
+
+    @property
+    def base_url(self) -> str:  # type: ignore[override]
+        self._raise_placeholder_error()
+        raise AssertionError("unreachable")
+
+    def set_http_logger(self, http_logger: "HTTPLogger | None") -> None:
+        self._raise_placeholder_error()
+
+    def set_session_id(self, session_id: str | None) -> None:
+        self._raise_placeholder_error()
+
+    async def verify_model(self, force: bool = False) -> bool:
+        self._raise_placeholder_error()
+        raise AssertionError("unreachable")
+
+    async def generate(
+        self,
+        messages: list[Message],
+        tools: list[ToolDefinition] | None = None,
+        config: GenerationConfig | None = None,
+        stream: bool = True,
+        verify_model: bool = False,
+    ) -> AsyncIterator[Event]:
+        self._raise_placeholder_error()
+        if False:  # pragma: no cover
+            yield
+
+    async def close(self) -> None:
+        pass
+
+
+# Placeholder instance for DEFAULT_COMPACTOR
+PLACEHOLDER_PROVIDER = PlaceholderProvider()

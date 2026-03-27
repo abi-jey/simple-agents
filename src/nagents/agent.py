@@ -17,6 +17,7 @@ from .batch import BatchConfig
 from .batch import BatchRequest
 from .batch import BatchStatus
 from .compaction import estimate_messages_tokens
+from .compaction import format_messages_as_text
 from .compaction import get_model_context_limit
 from .compaction import truncate_tool_results
 from .compactor import DEFAULT_COMPACTOR
@@ -174,7 +175,8 @@ class Agent:
 
         Args:
             provider: The LLM provider to use
-            session_manager: Session manager for conversation history
+            session_manager: Session manager for conversation history. Required for
+                           normal agents. Can be None for Compactor (will be injected).
             tools: Optional list of tool functions to register
             system_prompt: Optional system prompt to prepend to conversations
             max_tool_rounds: Maximum number of tool execution rounds
@@ -671,47 +673,40 @@ class Agent:
         # Truncate large tool results before compaction
         truncated_messages = truncate_tool_results(messages, max_chars=10000)
 
-        # Create compaction request
-        compaction_request_messages = [
-            Message(role="developer", content=compaction_prompt),
-            Message(
-                role="user",
-                content="Please summarize the conversation above. Preserve all important context, decisions, and action items.",
-            ),
-        ]
+        # Format conversation history as text
+        conversation_text = format_messages_as_text(truncated_messages)
 
-        # Use all truncated messages for context (no artificial limit)
-        context_messages = truncated_messages
+        logger.debug(
+            f"Compaction context: {len(truncated_messages)} messages formatted to {len(conversation_text)} chars"
+        )
 
-        logger.debug(f"Compaction context: {len(context_messages)} messages")
+        # Inject provider into compactor if needed
+        if compactor == "self":
+            compactor = Compactor(
+                provider=self.provider,
+                system_prompt=compaction_prompt,
+            )
+        elif not compactor.provider:
+            compactor.provider = self.provider
 
-        # Add context to request
-        all_messages: list[Message] = []
-        all_messages.extend(compaction_request_messages)
-        all_messages.extend(context_messages)
+        # Inject session into compactor
+        compactor.session = self.session
 
         # Run compaction
-        summary_text = ""
         try:
-            # Determine which provider to use
-            if compactor == "self":
-                compaction_provider = self.provider
-            elif isinstance(compactor, Compactor) and compactor.provider:
-                compaction_provider = compactor.provider
-            else:
-                compaction_provider = self.provider
-
-            logger.debug(f"Compaction request: {len(all_messages)} messages to {compaction_provider.model}")
-
-            # Collect the summary
-            async for event in compaction_provider.generate(
-                messages=all_messages,
-                stream=False,
+            summary_text = ""
+            async for event in compactor.run(
+                user_message=conversation_text,
+                session_id=compaction_session_id,
             ):
+                yield event
                 if isinstance(event, TextDoneEvent):
                     summary_text = event.text
-                    logger.debug(f"Compaction summary received: {len(summary_text)} chars")
-                    break
+
+            if not summary_text:
+                raise ValueError("Compaction returned empty summary")
+
+            logger.debug(f"Compaction summary received: {len(summary_text)} chars")
 
         except Exception as e:
             logger.error(f"Compaction failed: {e}")
