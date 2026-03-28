@@ -163,8 +163,8 @@ def format_contents(messages: list[Message]) -> list[dict[str, Any]]:
         if msg.role == "compaction_summary":
             continue
 
-        # Map roles
-        role = "user" if msg.role == "user" else "model"
+        # Map roles - developer converts to model (assistant) for compatibility
+        role = "model" if msg.role in ("developer", "assistant", "tool") else "user"
 
         parts: list[dict[str, Any]] = []
 

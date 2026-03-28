@@ -102,7 +102,9 @@ def format_messages(messages: list[Message]) -> list[dict[str, Any]]:
             result.append(formatted)
             continue
 
-        formatted = {"role": msg.role}
+        # Convert developer role to assistant for better compatibility
+        role = msg.role if msg.role != "developer" else "assistant"
+        formatted = {"role": role}
 
         # Format content (handles str, list[ContentPart], or None)
         formatted_content = _format_content(msg.content)

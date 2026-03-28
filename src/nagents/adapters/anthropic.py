@@ -114,10 +114,12 @@ def format_messages(messages: list[Message]) -> tuple[str | None, list[dict[str,
             compaction_summaries.append(content_str)
             continue
 
-        formatted: dict[str, Any] = {"role": msg.role}
+        # Convert developer role to assistant for better compatibility
+        role = msg.role if msg.role != "developer" else "assistant"
+        formatted: dict[str, Any] = {"role": role}
 
         # Handle content
-        if msg.role == "assistant":
+        if role == "assistant":
             # Assistant messages can have content and/or tool_use blocks
             content_parts: list[dict[str, Any]] = []
 
