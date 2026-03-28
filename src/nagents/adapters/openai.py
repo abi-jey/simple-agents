@@ -94,7 +94,7 @@ def format_messages(messages: list[Message]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for msg in messages:
         if msg.role == "compaction_summary":
-            formatted: dict[str, Any] = {"role": "developer"}
+            formatted: dict[str, Any] = {"role": "assistant"}
             content_str = msg.content if isinstance(msg.content, str) else ""
             formatted["content"] = (
                 COMPACTION_SUMMARY_PREFIX + content_str if content_str else COMPACTION_SUMMARY_PREFIX.rstrip()
