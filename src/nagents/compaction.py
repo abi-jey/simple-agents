@@ -251,8 +251,9 @@ def format_messages_as_text(messages: list[Message]) -> str:
             content = msg.content if isinstance(msg.content, str) else str(msg.content)
             lines.append(f"[TOOL RESULT: {msg.name}]\n{content}\n")
         elif msg.role == "developer":
+            # Convert developer messages to assistant for better compatibility
             content = msg.content if isinstance(msg.content, str) else str(msg.content)
-            lines.append(f"[DEVELOPER]\n{content}\n")
+            lines.append(f"[ASSISTANT]\n{content}\n")
         elif msg.role == "compaction_summary":
             content = msg.content if isinstance(msg.content, str) else str(msg.content)
             lines.append(f"[PREVIOUS SUMMARY]\n{content}\n")
