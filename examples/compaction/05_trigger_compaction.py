@@ -161,5 +161,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level="DEBUG", handlers=[RichHandler(console=console)))
+    logging.basicConfig(level="DEBUG", handlers=[RichHandler(console=console)])
     asyncio.run(main())

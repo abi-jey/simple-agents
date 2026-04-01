@@ -125,14 +125,16 @@ async def main() -> None:
 
         result = await agent.compact(session_id)
 
-        console.print(f"[green]✓ Compaction complete![/green]")
+        console.print("[green]✓ Compaction complete![/green]")
         console.print(f"[dim]Original messages: {result.original_message_count}[/dim]")
         console.print(f"[dim]New messages: {result.new_message_count}[/dim]")
         console.print(f"[dim]Original tokens: {result.original_token_count}[/dim]")
         console.print(f"[dim]Summary tokens: {result.summary_tokens}[/dim]")
         console.print(f"[dim]Compactor used: {result.compactor_used}[/dim]")
         console.print()
-        console.print(Panel(f"[bold]Summary (first 300 chars):[/bold]\n{result.summary_text[:300]}...", border_style="blue"))
+        console.print(
+            Panel(f"[bold]Summary (first 300 chars):[/bold]\n{result.summary_text[:300]}...", border_style="blue")
+        )
 
         # Check history size after compaction
         history_after = await session_manager.get_history(session_id)
@@ -162,5 +164,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level="DEBUG", handlers=[RichHandler(console=console)))
+    logging.basicConfig(level="DEBUG", handlers=[RichHandler(console=console)])
     asyncio.run(main())
