@@ -45,6 +45,7 @@ A lightweight, dependency-free LLM agent framework with direct HTTP-based provid
 - [x] **Streaming Events** - Real-time text chunks, tool calls, and usage statistics
 - [x] **Tool Execution** - Register Python functions as tools with automatic schema generation
 - [x] **Session Management** - SQLite-based conversation persistence
+- [x] **Context Compaction** - Automatic summarization to stay within context limits
 - [x] **Batch Processing** - Process multiple requests efficiently
 - [x] **HTTP Logging** - Debug with full HTTP/SSE traffic logging
 - [x] **Tool Hallucination Handling** - Graceful handling of unknown tool calls

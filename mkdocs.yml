@@ -85,6 +85,7 @@ nav:
       - Providers: guide/providers.md
       - Tools: guide/tools.md
       - Sessions: guide/sessions.md
+      - Compaction: guide/compaction.md
       - Events: guide/events.md
       - Batch Processing: guide/batch.md
   - Examples:
