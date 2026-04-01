@@ -21,6 +21,8 @@ from typing import Literal
 
 import aiosqlite
 
+from ..migrations.batch import migrations as batch_migrations
+from ..migrations.manager import MigrationManager
 from .types import BatchJob
 from .types import BatchRequest
 from .types import BatchRequestCounts
@@ -65,103 +67,72 @@ class BatchStore:
         """
         self.db_path = db_path
         self._initialized = False
+        self._migration_manager: MigrationManager | None = None
 
     async def initialize(self) -> None:
-        """Create tables if they don't exist."""
+        """Initialize database and run migrations."""
         if self._initialized:
             return
 
         # Ensure parent directory exists
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.executescript(
-                """
-                -- Core batch job tracking
-                CREATE TABLE IF NOT EXISTS v2_batch_jobs (
-                    id TEXT PRIMARY KEY,
-                    provider TEXT NOT NULL,  -- 'openai' or 'anthropic'
-                    status TEXT NOT NULL,    -- BatchStatus value
-                    model TEXT NOT NULL,
-
-                    -- Request counts
-                    total_requests INTEGER DEFAULT 0,
-                    succeeded INTEGER DEFAULT 0,
-                    failed INTEGER DEFAULT 0,
-                    cancelled INTEGER DEFAULT 0,
-                    expired INTEGER DEFAULT 0,
-
-                    -- Timestamps (ISO format)
-                    created_at TEXT,
-                    expires_at TEXT,
-                    completed_at TEXT,
-
-                    -- Provider-specific IDs
-                    input_file_id TEXT,      -- OpenAI
-                    output_file_id TEXT,     -- OpenAI
-                    error_file_id TEXT,      -- OpenAI
-                    results_url TEXT,        -- Anthropic
-
-                    -- Processing state
-                    processed INTEGER DEFAULT 0,  -- 0 = pending, 1 = processed
-                    processed_at TEXT,
-
-                    -- Callback for result handling
-                    callback_name TEXT,      -- Handler function name
-                    callback_context TEXT,   -- JSON context for handler
-
-                    -- API connection info (for resuming)
-                    base_url TEXT,
-
-                    -- Metadata
-                    metadata TEXT,           -- JSON user metadata
-
-                    -- Tracking
-                    db_created_at TEXT DEFAULT (datetime('now')),
-                    db_updated_at TEXT DEFAULT (datetime('now'))
-                );
-
-                -- Store original requests for retry capability
-                CREATE TABLE IF NOT EXISTS v2_batch_requests (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    batch_id TEXT NOT NULL,
-                    custom_id TEXT NOT NULL,
-                    messages TEXT NOT NULL,      -- JSON serialized messages
-                    model TEXT,
-                    tools TEXT,                  -- JSON serialized tools
-                    config TEXT,                 -- JSON serialized config
-                    system_prompt TEXT,
-
-                    -- Result tracking
-                    result_type TEXT,            -- succeeded, errored, cancelled, expired
-                    result_content TEXT,
-                    result_error TEXT,
-
-                    FOREIGN KEY (batch_id) REFERENCES v2_batch_jobs(id),
-                    UNIQUE (batch_id, custom_id)
-                );
-
-                -- Indexes for common queries
-                CREATE INDEX IF NOT EXISTS idx_v2_batch_jobs_status
-                ON v2_batch_jobs(status);
-
-                CREATE INDEX IF NOT EXISTS idx_v2_batch_jobs_processed
-                ON v2_batch_jobs(processed);
-
-                CREATE INDEX IF NOT EXISTS idx_v2_batch_jobs_provider
-                ON v2_batch_jobs(provider);
-
-                CREATE INDEX IF NOT EXISTS idx_v2_batch_requests_batch
-                ON v2_batch_requests(batch_id);
-
-                CREATE INDEX IF NOT EXISTS idx_v2_batch_requests_custom_id
-                ON v2_batch_requests(batch_id, custom_id);
-            """
-            )
-            await db.commit()
+        # Create migration manager with batch-specific migrations
+        self._migration_manager = MigrationManager(self.db_path, db_name="batch", migrations=list(batch_migrations))
+        await self._migration_manager.initialize()
 
         self._initialized = True
         logger.debug(f"Batch store initialized at {self.db_path}")
+
+    async def get_schema_version(self) -> int:
+        """Get current database schema version.
+
+        Returns:
+            Current version number, or 0 if no migrations applied
+        """
+        await self.initialize()
+        if self._migration_manager is None:
+            return 0
+        return await self._migration_manager.get_version()
+
+    async def get_migration_history(self) -> list[dict[str, Any]]:
+        """Get history of applied migrations.
+
+        Returns:
+            List of migration info dicts
+        """
+        await self.initialize()
+        if self._migration_manager is None:
+            return []
+        return await self._migration_manager.get_applied_migrations()
+
+    async def rollback_migration(self, steps: int = 1) -> None:
+        """Rollback the last N migrations.
+
+        Args:
+            steps: Number of migrations to rollback (default: 1)
+
+        Raises:
+            ValueError: If not enough migrations to rollback
+        """
+        await self.initialize()
+        if self._migration_manager is None:
+            return
+        await self._migration_manager.rollback(steps)
+
+    async def migrate_to_version(self, version: int) -> None:
+        """Migrate database to a specific version.
+
+        Args:
+            version: Target schema version
+
+        Raises:
+            ValueError: If target version is invalid
+        """
+        await self.initialize()
+        if self._migration_manager is None:
+            return
+        await self._migration_manager.migrate_to(version)
 
     async def save_batch(
         self,

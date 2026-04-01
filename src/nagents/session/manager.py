@@ -10,6 +10,8 @@ from typing import Any
 
 import aiosqlite
 
+from ..migrations.manager import MigrationManager
+from ..migrations.sessions import migrations as session_migrations
 from ..types import AudioContent
 from ..types import ContentPart
 from ..types import DocumentContent
@@ -45,55 +47,74 @@ class SessionManager:
         """
         self.db_path = db_path
         self._initialized = False
+        self._migration_manager: MigrationManager | None = None
 
     async def initialize(self) -> None:
-        """Create tables if they don't exist."""
+        """Initialize database and run migrations."""
         if self._initialized:
             return
 
         # Ensure parent directory exists
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS v2_sessions (
-                    id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    compacted_at_message_id INTEGER,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
+        # Create migration manager with session-specific migrations
+        self._migration_manager = MigrationManager(
+            self.db_path, db_name="sessions", migrations=list(session_migrations)
+        )
+        await self._migration_manager.initialize()
 
-                CREATE TABLE IF NOT EXISTS v2_messages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    content TEXT,
-                    tool_calls TEXT,
-                    tool_call_id TEXT,
-                    name TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (session_id) REFERENCES v2_sessions(id)
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_v2_messages_session
-                ON v2_messages(session_id);
-
-                CREATE INDEX IF NOT EXISTS idx_v2_sessions_user
-                ON v2_sessions(user_id);
-            """
-            )
-            await db.commit()
-
-            # Migration: add compacted_at_message_id column to existing databases
-            try:
-                await db.execute("ALTER TABLE v2_sessions ADD COLUMN compacted_at_message_id INTEGER")
-                await db.commit()
-            except Exception:
-                pass  # Column already exists
         self._initialized = True
         logger.debug(f"Session database initialized at {self.db_path}")
+
+    async def get_schema_version(self) -> int:
+        """Get current database schema version.
+
+        Returns:
+            Current version number, or 0 if no migrations applied
+        """
+        await self.initialize()
+        if self._migration_manager is None:
+            return 0
+        return await self._migration_manager.get_version()
+
+    async def get_migration_history(self) -> list[dict[str, Any]]:
+        """Get history of applied migrations.
+
+        Returns:
+            List of migration info dicts
+        """
+        await self.initialize()
+        if self._migration_manager is None:
+            return []
+        return await self._migration_manager.get_applied_migrations()
+
+    async def rollback_migration(self, steps: int = 1) -> None:
+        """Rollback the last N migrations.
+
+        Args:
+            steps: Number of migrations to rollback (default: 1)
+
+        Raises:
+            ValueError: If not enough migrations to rollback
+        """
+        await self.initialize()
+        if self._migration_manager is None:
+            return
+        await self._migration_manager.rollback(steps)
+
+    async def migrate_to_version(self, version: int) -> None:
+        """Migrate database to a specific version.
+
+        Args:
+            version: Target schema version
+
+        Raises:
+            ValueError: If target version is invalid
+        """
+        await self.initialize()
+        if self._migration_manager is None:
+            return
+        await self._migration_manager.migrate_to(version)
 
     async def get_or_create_session(self, session_id: str, user_id: str) -> str:
         """
