@@ -253,6 +253,9 @@ class Agent:
         # Maps session_id -> last known prompt_tokens
         self._session_tokens: dict[str, int] = {}
 
+        # Flag to request compaction during run (set by trigger_compaction())
+        self._compaction_requested: bool = False
+
         self._initialized = False
         self._http_logger: FileHTTPLogger | None = None
         self._batch_client: BatchClient | None = None
@@ -586,10 +589,7 @@ class Agent:
             return len(messages) >= trigger.length
 
     async def _maybe_compact(self, messages: list[Message], session_id: str) -> AsyncIterator[Event]:
-        """Run compaction if needed.
-
-        Yields CompactionStartedEvent and CompactionDoneEvent if compaction occurs.
-        Updates the session history with the compaction summary.
+        """Run compaction if threshold is met (automatic trigger).
 
         Args:
             messages: Current message list
@@ -639,6 +639,34 @@ class Agent:
             else:
                 logger.debug(f"Compaction skipped: {len(messages)} messages < {trigger.length} threshold")
             return
+
+        # Delegate to _do_compact
+        async for event in self._do_compact(messages, session_id):
+            yield event
+
+    async def _do_compact(self, messages: list[Message], session_id: str) -> AsyncIterator[Event]:
+        """Execute compaction regardless of threshold.
+
+        Core compaction logic used by both automatic and manual triggers.
+
+        Args:
+            messages: Current message list (should include system prompt)
+            session_id: Session ID
+
+        Yields:
+            CompactionStartedEvent, intermediate events, CompactionDoneEvent
+        """
+        compactor = self._resolve_compactor()
+
+        if compactor is None:
+            raise ValueError("No compactor configured. Set compactor=DEFAULT_COMPACTOR or compactor='self'")
+
+        if isinstance(compactor, _CompactorNotSet):
+            # Use default compactor
+            compactor = DEFAULT_COMPACTOR
+
+        # Get trigger for event (use resolved trigger or None for manual)
+        trigger = self._resolve_compact_on()
 
         # Get info before compaction
         original_count = len(messages)
@@ -752,6 +780,60 @@ class Agent:
             f"Compaction complete: {original_count} -> {new_count} messages, "
             f"{original_tokens} -> {summary_tokens} tokens"
         )
+
+    def trigger_compaction(self) -> None:
+        """Request compaction before the next generation cycle.
+
+        Call this to trigger compaction before the next model call.
+        The compaction happens after all pending tool calls complete,
+        before the next generation round.
+
+        Useful when a tool knows it has generated a lot of context.
+
+        Example:
+            # During run(), call this before the next generation:
+            agent.trigger_compaction()
+            # Compaction will happen before next model call
+        """
+        self._compaction_requested = True
+
+    async def compact(self, session_id: str) -> "CompactionDoneEvent":
+        """Manually trigger compaction for a session.
+
+        Call this outside of run() to compact a session on demand.
+
+        Args:
+            session_id: Session to compact
+
+        Returns:
+            CompactionDoneEvent with summary and stats
+
+        Raises:
+            ValueError: If no compactor configured or session not found
+
+        Example:
+            # Compact a session before continuing
+            result = await agent.compact("session-123")
+            print(f"Compacted: {result.original_message_count} -> {result.new_message_count}")
+            print(f"Summary: {result.summary_text[:100]}...")
+        """
+        # Get current messages
+        messages: list[Message] = []
+        if self.system_prompt:
+            messages.append(Message(role="system", content=self.system_prompt))
+        history = await self.session.get_history(session_id)
+        messages.extend(history)
+
+        # Run compaction and collect result
+        result: CompactionDoneEvent | None = None
+        async for event in self._do_compact(messages, session_id):
+            if isinstance(event, CompactionDoneEvent):
+                result = event
+
+        if result is None:
+            raise ValueError("Compaction did not complete")
+
+        return result
 
     async def run(
         self,
@@ -1020,6 +1102,22 @@ class Agent:
                             name=tool_call.name,
                         ),
                     )
+
+                # Check if compaction was requested via trigger_compaction()
+                if self._compaction_requested:
+                    self._compaction_requested = False  # Reset flag
+
+                    # Reload messages with tool results
+                    messages = []
+                    if self.system_prompt:
+                        messages.append(Message(role="system", content=self.system_prompt))
+                    history = await self.session.get_history(session_id)
+                    messages.extend(history)
+                    messages = self._filter_unsupported_audio(messages)
+
+                    # Run compaction
+                    async for event in self._do_compact(messages, session_id):
+                        yield event
 
                 # Continue to next round (model will see tool results)
                 continue
