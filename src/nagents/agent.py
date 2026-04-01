@@ -982,6 +982,30 @@ class Agent:
                     # The next API call will give us new actual prompt_tokens
                     self._session_tokens[session_id] = event.summary_tokens
 
+            # Check if compaction was requested via trigger_compaction()
+            if self._compaction_requested:
+                self._compaction_requested = False  # Reset flag
+
+                # Reload messages with latest history
+                messages = []
+                if self.system_prompt:
+                    messages.append(Message(role="system", content=self.system_prompt))
+                history = await self.session.get_history(session_id)
+                messages.extend(history)
+                messages = self._filter_unsupported_audio(messages)
+
+                # Run compaction
+                async for event in self._do_compact(messages, session_id):
+                    yield event
+
+                # Reload messages after compaction
+                messages = []
+                if self.system_prompt:
+                    messages.append(Message(role="system", content=self.system_prompt))
+                history = await self.session.get_history(session_id)
+                messages.extend(history)
+                messages = self._filter_unsupported_audio(messages)
+
             # Generate response
             pending_tool_calls: list[ToolCall] = []
             full_text = ""
@@ -1102,22 +1126,6 @@ class Agent:
                             name=tool_call.name,
                         ),
                     )
-
-                # Check if compaction was requested via trigger_compaction()
-                if self._compaction_requested:
-                    self._compaction_requested = False  # Reset flag
-
-                    # Reload messages with tool results
-                    messages = []
-                    if self.system_prompt:
-                        messages.append(Message(role="system", content=self.system_prompt))
-                    history = await self.session.get_history(session_id)
-                    messages.extend(history)
-                    messages = self._filter_unsupported_audio(messages)
-
-                    # Run compaction
-                    async for event in self._do_compact(messages, session_id):
-                        yield event
 
                 # Continue to next round (model will see tool results)
                 continue
