@@ -199,7 +199,7 @@ async for event in agent.run("What's the context?", session_id="user-123"):
             # Request compaction before next generation
             agent.trigger_compaction()  # (1)!
             print("Compaction triggered for next round")
-    
+
     # Handle other events...
 ```
 
@@ -245,7 +245,7 @@ async for event in agent.run("Long conversation...", session_id="user-123"):
     if isinstance(event, CompactionStartedEvent):
         print(f"Compaction started: {event.message_count} messages")
         print(f"Estimated tokens: {event.estimated_tokens}")
-    
+
     elif isinstance(event, CompactionDoneEvent):
         print(f"Compaction complete!")
         print(f"  Before: {event.original_message_count} messages, {event.original_token_count} tokens")
@@ -294,7 +294,7 @@ sequenceDiagram
     participant Agent
     participant Compactor
     participant Session
-    
+
     User->>Agent: Long message
     Agent->>Session: Get history
     Session->>Agent: 150k tokens of history
@@ -325,7 +325,7 @@ Session: user-123
 After compaction:
 ```
 Session: user-123
-└── compaction_summary: "Conversation summary: User asked about weather, 
+└── compaction_summary: "Conversation summary: User asked about weather,
     discussed travel plans, preferred morning meetings..."
 ```
 
@@ -346,7 +346,7 @@ The next `get_history()` call returns just the summary message.
 !!! warning "Context Loss"
 
     Compaction is lossy compression. Some details will be lost. Test that:
-    
+
     - Important facts are preserved
     - User preferences are retained
     - Task context remains clear
