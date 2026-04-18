@@ -163,6 +163,7 @@ from .types import JsonSchema
 from .types import JsonSchemaProperty
 from .types import JsonValue
 from .types import Message
+from .types import OpenRouterReasoningConfig
 from .types import RetryConfig
 from .types import TextContent
 from .types import ToolArguments
@@ -211,6 +212,7 @@ __all__ = [
     "Messages",
     "NagentsError",
     "OpenAISTTService",
+    "OpenRouterReasoningConfig",
     "Provider",
     "ProviderType",
     "RateLimitEvent",

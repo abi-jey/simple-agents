@@ -215,6 +215,30 @@ def get_model_context_limit(provider: "Provider") -> int:
     if "fw-" in model:
         return 8000  # Conservative default
 
+    # OpenRouter vendor-prefixed models
+    # OpenAI models via OpenRouter
+    if model.startswith("openai/gpt-5"):
+        return 200000
+    if model.startswith("openai/gpt-4o"):
+        return 128000
+    if model.startswith("openai/gpt-4"):
+        return 8192
+    if model.startswith("openai/gpt-3.5"):
+        return 4096
+    if model.startswith("openai/o1") or model.startswith("openai/o3") or model.startswith("openai/o4"):
+        return 200000
+    # Google models via OpenRouter
+    if model.startswith("google/gemini-2.5") or model.startswith("google/gemini-3"):
+        return 1000000  # 1M tokens
+    if model.startswith("google/gemini-1.5"):
+        return 1000000
+    # Anthropic models via OpenRouter
+    if model.startswith("anthropic/claude"):
+        return 200000
+    # DeepSeek via OpenRouter
+    if model.startswith("deepseek/"):
+        return 64000
+
     # Unknown model - use safe default
     logger.debug(f"Unknown model context limit for: {model}, using default {DEFAULT_CONTEXT_LIMIT}")
     return DEFAULT_CONTEXT_LIMIT

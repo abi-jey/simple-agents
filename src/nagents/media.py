@@ -117,6 +117,11 @@ _PROVIDER_CAPABILITIES: dict[str, MediaCapabilities] = {
         image_formats=frozenset({"jpeg", "jpg", "png", "gif", "webp"}),
         document_formats=frozenset(),
     ),
+    "openrouter": MediaCapabilities(
+        audio_formats=frozenset(),
+        image_formats=frozenset({"jpeg", "jpg", "png", "gif", "webp"}),
+        document_formats=frozenset(),
+    ),
     # Azure OpenAI V1 does NOT support input_audio content blocks at all.
     "azure_openai_compatible_v1": MediaCapabilities(
         audio_formats=frozenset(),

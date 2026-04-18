@@ -46,7 +46,8 @@ logger = logging.getLogger(__name__)
 class ProviderType(Enum):
     """Supported provider types."""
 
-    OPENAI_COMPATIBLE = "openai_compatible"  # OpenAI, Gemini-via-compat, OpenRouter, etc.
+    OPENAI_COMPATIBLE = "openai_compatible"  # OpenAI, Gemini-via-compat, Ollama, etc.
+    OPENROUTER = "openrouter"  # OpenRouter (OpenAI-compatible with reasoning support)
     GEMINI_NATIVE = "gemini_native"  # Native Gemini REST API
     ANTHROPIC = "anthropic"  # Anthropic Claude API
     AZURE_OPENAI_COMPATIBLE_V1 = "azure_openai_compatible_v1"  # Azure OpenAI Service
@@ -117,6 +118,8 @@ class Provider:
             self.base_url = base_url.rstrip("/")
         elif provider_type == ProviderType.OPENAI_COMPATIBLE:
             self.base_url = "https://api.openai.com/v1"
+        elif provider_type == ProviderType.OPENROUTER:
+            self.base_url = "https://openrouter.ai/api/v1"
         elif provider_type == ProviderType.ANTHROPIC:
             self.base_url = "https://api.anthropic.com/v1"
         elif provider_type == ProviderType.AZURE_OPENAI_COMPATIBLE_V1:
@@ -177,11 +180,17 @@ class Provider:
             self._model_verified = True
             return True
         try:
-            if self.provider_type == ProviderType.OPENAI_COMPATIBLE:
+            if self.provider_type in (ProviderType.OPENAI_COMPATIBLE, ProviderType.OPENROUTER):
                 url = f"{self.base_url}/models"
                 headers = {"Authorization": f"Bearer {self.api_key}"}
+
+                # OpenRouter also accepts an HTTP-Referer header for identification
+                if self.provider_type == ProviderType.OPENROUTER:
+                    headers["HTTP-Referer"] = "https://github.com/nagents"
+
                 response = await self._http.get_json(url, headers)
-                logger.info(f"Model list response: {response}")
+                model_count = len(response.get("data", []))
+                logger.info(f"Model list response: {model_count} models available")
                 models = [m["id"] for m in response.get("data", [])]
 
                 # Check for exact match first
@@ -339,6 +348,9 @@ class Provider:
         if self.provider_type == ProviderType.OPENAI_COMPATIBLE:
             async for event in self._generate_openai(messages, tools, config, stream):
                 yield event
+        elif self.provider_type == ProviderType.OPENROUTER:
+            async for event in self._generate_openrouter(messages, tools, config, stream):
+                yield event
         elif (
             self.provider_type == ProviderType.AZURE_OPENAI_COMPATIBLE
             or self.provider_type == ProviderType.AZURE_OPENAI_COMPATIBLE_V1
@@ -462,6 +474,52 @@ class Provider:
                 body["top_p"] = config.top_p
             if config.stop:
                 body["stop"] = config.stop
+
+        if stream:
+            async for event in self._stream_openai(url, body, headers):
+                yield event
+        else:
+            async for event in self._non_stream_openai(url, body, headers):
+                yield event
+
+    async def _generate_openrouter(
+        self,
+        messages: list[Message],
+        tools: list[ToolDefinition] | None,
+        config: GenerationConfig | None,
+        stream: bool,
+    ) -> AsyncIterator[Event]:
+        """Generate using OpenRouter API (OpenAI-compatible with reasoning support)."""
+        url = f"{self.base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/nagents",
+        }
+
+        body: dict[str, Any] = {
+            "model": self.model,
+            "messages": openai_adapter.format_messages(messages),
+            "stream": stream,
+        }
+
+        if stream:
+            body["stream_options"] = {"include_usage": True}
+
+        if tools:
+            body["tools"] = openai_adapter.format_tools(tools)
+
+        if config:
+            if config.temperature is not None:
+                body["temperature"] = config.temperature
+            if config.max_tokens is not None:
+                body["max_completion_tokens"] = config.max_tokens
+            if config.top_p is not None:
+                body["top_p"] = config.top_p
+            if config.stop:
+                body["stop"] = config.stop
+            if config.reasoning:
+                body["reasoning"] = config.reasoning
 
         if stream:
             async for event in self._stream_openai(url, body, headers):
@@ -610,8 +668,8 @@ class Provider:
                 elif fr == "content_filter":
                     finish_reason = FinishReason.CONTENT_FILTER
 
-            # Handle reasoning content (e.g., from Kimi, DeepSeek, o1 models)
-            reasoning = delta.get("reasoning_content")
+            # Handle reasoning content (e.g., from Kimi, DeepSeek, o1 models, Ollama)
+            reasoning = delta.get("reasoning_content") or delta.get("reasoning")
             if reasoning:
                 full_reasoning += reasoning
                 yield ReasoningChunkEvent(chunk=reasoning, usage=latest_usage)
@@ -695,8 +753,8 @@ class Provider:
                 reasoning_tokens=completion_details.get("reasoning_tokens", 0),
             )
 
-        # Handle reasoning content (from chain-of-thought models)
-        reasoning = message.get("reasoning_content")
+        # Handle reasoning content (from chain-of-thought models, Ollama)
+        reasoning = message.get("reasoning_content") or message.get("reasoning")
         if reasoning:
             yield ReasoningChunkEvent(chunk=reasoning, usage=latest_usage, extra=extra)
 

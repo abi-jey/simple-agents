@@ -49,6 +49,13 @@ class GeminiThinkingConfig(TypedDict, total=False):
     includeThoughts: bool  # Whether to include thoughts in response
 
 
+class OpenRouterReasoningConfig(TypedDict, total=False):
+    """OpenRouter-specific reasoning/reasoning configuration."""
+
+    enabled: bool  # Whether to enable reasoning/thinking
+    max_tokens: int  # Maximum tokens for reasoning output
+
+
 # =============================================================================
 # Multimodal Content Types
 # =============================================================================
@@ -176,3 +183,5 @@ class GenerationConfig:
     stop: list[str] | None = None
     # Gemini-specific
     thinking_config: GeminiThinkingConfig | None = None
+    # OpenRouter-specific
+    reasoning: OpenRouterReasoningConfig | None = None
